@@ -1,5 +1,7 @@
 # Pulsecast
 
+[![CI](https://github.com/olveirap/pulsecast/actions/workflows/ci.yml/badge.svg)](https://github.com/olveirap/pulsecast/actions/workflows/ci.yml)
+
 **Probabilistic shipment demand forecasting** using NYC TLC trip records and
 live MTA GTFS-Realtime congestion signals.
 
