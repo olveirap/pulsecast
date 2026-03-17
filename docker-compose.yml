@@ -1,0 +1,125 @@
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # TimescaleDB – time-series storage
+  # ─────────────────────────────────────────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pulsecast
+      POSTGRES_USER: pulsecast
+      POSTGRES_PASSWORD: pulsecast
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./data/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulsecast -d pulsecast"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Redis – forecast cache
+  # ─────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MLflow – experiment tracking
+  # ─────────────────────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.1
+    restart: unless-stopped
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    ports:
+      - "5000:5000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GTFS-RT poller – streams MTA delay_index into TimescaleDB
+  # ─────────────────────────────────────────────────────────────────────────
+  gtfs-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python -m data.ingest.gtfs_rt
+    environment:
+      MTA_FEED_URL: ${MTA_FEED_URL:-https://api.mta.info/GTFS}
+      MTA_API_KEY: ${MTA_API_KEY:-}
+      TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f gtfs_rt || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # FastAPI serving layer
+  # ─────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: >
+      uvicorn serving.main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 2
+    environment:
+      TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+      REDIS_URL: redis://redis:6379/0
+      ONNX_DIR: /app/models/onnx
+      N_FEATURES: "42"
+    volumes:
+      - onnx_models:/app/models/onnx:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  timescale_data:
+  mlflow_artifacts:
+  onnx_models:
