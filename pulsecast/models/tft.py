@@ -105,7 +105,7 @@ class TFTForecaster:
             predict_mode=predict,
         )
 
-    def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> "TFTForecaster":
+    def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> TFTForecaster:
         """
         Train the TFT model.
 
