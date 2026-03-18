@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from serving.schemas import ForecastRequest, ForecastResponse
+from pulsecast.serving.schemas import ForecastRequest, ForecastResponse
 
 # ---------------------------------------------------------------------------
 # ForecastRequest

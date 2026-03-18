@@ -2,9 +2,9 @@
 tests/test_features.py – Unit tests for feature builders.
 
 Covers:
-  - features.demand.build_demand_features
-  - features.calendar.build_calendar_features
-  - features.congestion.build_congestion_features
+  - pulsecast.features.demand.build_demand_features
+  - pulsecast.features.calendar.build_calendar_features
+  - pulsecast.features.congestion.build_congestion_features
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from datetime import datetime, timedelta
 import polars as pl
 import pytest
 
-from features.calendar import build_calendar_features
-from features.congestion import build_congestion_features
-from features.demand import build_demand_features
+from pulsecast.features.calendar import build_calendar_features
+from pulsecast.features.congestion import build_congestion_features
+from pulsecast.features.demand import build_demand_features
 
 # ---------------------------------------------------------------------------
 # Helpers

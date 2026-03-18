@@ -2,9 +2,9 @@
 tests/test_cache.py – Unit tests for the serving cache layer.
 
 Covers:
-  - serving.cache._bucket_delay edge cases
-  - serving.cache._make_key structure
-  - serving.cache.ForecastCache get/set behaviour (Redis mocked)
+  - pulsecast.serving.cache._bucket_delay edge cases
+  - pulsecast.serving.cache._make_key structure
+  - pulsecast.serving.cache.ForecastCache get/set behaviour (Redis mocked)
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from serving.cache import ForecastCache, _bucket_delay, _make_key
+from pulsecast.serving.cache import ForecastCache, _bucket_delay, _make_key
 
 # ---------------------------------------------------------------------------
 # _bucket_delay
@@ -93,7 +93,7 @@ def _make_cache(redis_client_mock: MagicMock) -> ForecastCache:
     """Return a ForecastCache whose internal Redis client is the given mock.
 
     ``redis`` is imported lazily inside ``__init__``, so we patch it via
-    ``sys.modules`` rather than ``patch("serving.cache.redis")``.
+    ``sys.modules`` rather than ``patch("pulsecast.serving.cache.redis")``.
     """
     import importlib
     import sys
@@ -102,7 +102,7 @@ def _make_cache(redis_client_mock: MagicMock) -> ForecastCache:
     redis_module_mock.from_url.return_value = redis_client_mock
 
     with patch.dict(sys.modules, {"redis": redis_module_mock}):
-        import serving.cache as sc
+        import pulsecast.serving.cache as sc
 
         importlib.reload(sc)
         return sc.ForecastCache(redis_url="redis://localhost:6379/0", ttl=60)

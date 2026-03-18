@@ -10,11 +10,11 @@ BACKFILL_END   ?= $(shell date +%Y-%m-%d)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest:
-	$(PYTHON) -m data.ingest.tlc
+	$(PYTHON) -m pulsecast.data.ingest.tlc
 
 # ── GTFS-RT backfill ─────────────────────────────────────────────────────────
 backfill:
-	$(PYTHON) -m data.ingest.gtfs_rt_backfill \
+	$(PYTHON) -m pulsecast.data.ingest.gtfs_rt_backfill \
 		--start $(BACKFILL_START) \
 		--end   $(BACKFILL_END)
 
@@ -22,31 +22,31 @@ backfill:
 features:
 	$(PYTHON) -c "\
 import polars as pl; \
-from features.demand import build_demand_features; \
-from features.calendar import build_calendar_features; \
-from features.congestion import build_congestion_features; \
+from pulsecast.features.demand import build_demand_features; \
+from pulsecast.features.calendar import build_calendar_features; \
+from pulsecast.features.congestion import build_congestion_features; \
 print('Feature modules imported successfully.')"
 
 # ── Model training ────────────────────────────────────────────────────────────
 train:
 	$(PYTHON) -c "\
-from models.baseline import BaselineForecaster; \
-from models.lgbm import LGBMForecaster; \
+from pulsecast.models.baseline import BaselineForecaster; \
+from pulsecast.models.lgbm import LGBMForecaster; \
 print('Model modules imported successfully.')"
 
 # ── ONNX export ───────────────────────────────────────────────────────────────
 export:
 	$(PYTHON) -c "\
-from models.export import export_lgbm_to_onnx; \
+from pulsecast.models.export import export_lgbm_to_onnx; \
 print('Export module imported successfully.')"
 
 # ── Serving (local dev) ───────────────────────────────────────────────────────
 serve:
-	uvicorn serving.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn pulsecast.serving.main:app --reload --host 0.0.0.0 --port 8000
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 dashboard:
-	streamlit run dashboard/app.py
+	streamlit run pulsecast/dashboard/app.py
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 test:

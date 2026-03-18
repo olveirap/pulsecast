@@ -53,7 +53,7 @@ def _make_ort_module() -> MagicMock:
 @pytest.fixture()
 def app_client():
     """
-    Yield (TestClient, serving.main module, redis_client) with all external I/O mocked:
+    Yield (TestClient, pulsecast.serving.main module, redis_client) with all external I/O mocked:
       - onnxruntime   → MagicMock InferenceSession returning fixed predictions
       - redis         → MagicMock client (cache always misses by default)
       - psycopg2      → MagicMock connection returning delay_index=0.5
@@ -80,7 +80,7 @@ def app_client():
         patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
         patch("psycopg2.connect", mock_pg),
     ):
-        import serving.main as main_mod
+        import pulsecast.serving.main as main_mod
 
         importlib.reload(main_mod)
 

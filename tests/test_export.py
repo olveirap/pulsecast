@@ -31,7 +31,7 @@ _N_ROWS = 80
 @pytest.fixture(scope="module")
 def forecaster():
     """Fit a tiny LightGBM forecaster once for the entire module."""
-    from models.lgbm import LGBMForecaster
+    from pulsecast.models.lgbm import LGBMForecaster
 
     rng = np.random.default_rng(0)
     X = rng.standard_normal((_N_ROWS, _N_FEATURES))
@@ -44,7 +44,7 @@ def forecaster():
 @pytest.fixture(scope="module")
 def exported_paths(forecaster):
     """Export the fitted forecaster to ONNX once and yield the paths dict."""
-    from models.export import export_lgbm_to_onnx
+    from pulsecast.models.export import export_lgbm_to_onnx
 
     with tempfile.TemporaryDirectory() as tmpdir:
         paths = export_lgbm_to_onnx(
@@ -89,7 +89,7 @@ def test_export_onnx_output_shape(exported_paths):
 
 def test_export_parity_with_lgbm_predict(forecaster, exported_paths):
     """ONNX predictions must match LightGBM predictions within tolerance."""
-    from models.export import _PARITY_ATOL
+    from pulsecast.models.export import _PARITY_ATOL
 
     rng = np.random.default_rng(99)
     X_test = rng.standard_normal((50, _N_FEATURES))

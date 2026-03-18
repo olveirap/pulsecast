@@ -4,7 +4,7 @@ validation.
 
 Usage
 -----
->>> from models.export import export_lgbm_to_onnx
+>>> from pulsecast.models.export import export_lgbm_to_onnx
 >>> export_lgbm_to_onnx(forecaster, n_features=42, output_dir="models/onnx")
 """
 
@@ -35,7 +35,7 @@ def export_lgbm_to_onnx(
     Parameters
     ----------
     forecaster : LGBMForecaster
-        A fitted instance of :class:`models.lgbm.LGBMForecaster`.
+        A fitted instance of :class:`pulsecast.models.lgbm.LGBMForecaster`.
     n_features : int
         Number of input features (used to generate parity check data).
     output_dir : str | Path

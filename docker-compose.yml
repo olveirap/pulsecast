@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: pulsecast
     volumes:
       - timescale_data:/var/lib/postgresql/data
-      - ./data/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./pulsecast/data/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -71,7 +71,7 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: python -m data.ingest.gtfs_rt
+    command: python -m pulsecast.data.ingest.gtfs_rt
     environment:
       MTA_FEED_URL: ${MTA_FEED_URL:-https://api.mta.info/GTFS}
       MTA_API_KEY: ${MTA_API_KEY:-}
@@ -94,7 +94,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     command: >
-      uvicorn serving.main:app
+      uvicorn pulsecast.serving.main:app
       --host 0.0.0.0
       --port 8000
       --workers 2

@@ -4,7 +4,7 @@ walk-forward cross-validation.
 
 Usage
 -----
->>> from models.lgbm import LGBMForecaster
+>>> from pulsecast.models.lgbm import LGBMForecaster
 >>> model = LGBMForecaster()
 >>> model.fit(X_train, y_train)
 >>> preds = model.predict(X_test)   # {"p10": [...], "p50": [...], "p90": [...]}

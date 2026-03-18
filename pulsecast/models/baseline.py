@@ -3,7 +3,7 @@ baseline.py – MSTL decomposition + AutoARIMA per route via statsforecast.
 
 Usage
 -----
->>> from models.baseline import BaselineForecaster
+>>> from pulsecast.models.baseline import BaselineForecaster
 >>> model = BaselineForecaster()
 >>> model.fit(train_df)          # pl.DataFrame with route_id, hour, volume
 >>> forecasts = model.predict(horizon=168)
