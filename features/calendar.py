@@ -11,7 +11,8 @@ Features produced:
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import math
+from datetime import date, datetime
 
 import polars as pl
 
@@ -48,6 +49,36 @@ def _days_to_next_holiday(dt: date) -> int:
         if h >= dt:
             return (h - dt).days
     return 0
+
+
+def scalar_calendar_features(dt: datetime) -> dict[str, float]:
+    """Return all calendar features for a single *datetime* as a plain dict.
+
+    Keys returned (in order):
+      hour_of_day, dow, month, week_of_year, is_weekend,
+      days_to_next_us_holiday, nyc_event_flag,
+      hour_sin, hour_cos, dow_sin, dow_cos, month_sin, month_cos
+    """
+    d = dt.date()
+    h = dt.hour
+    dow = dt.weekday()  # 0 = Monday, 6 = Sunday
+    month = dt.month
+    week = dt.isocalendar()[1]
+    return {
+        "hour_of_day": float(h),
+        "dow": float(dow),
+        "month": float(month),
+        "week_of_year": float(week),
+        "is_weekend": float(int(dow >= 5)),
+        "days_to_next_us_holiday": float(_days_to_next_holiday(d)),
+        "nyc_event_flag": float(int((d.month, d.day) in _NYC_EVENTS)),
+        "hour_sin": math.sin(2 * math.pi * h / 24),
+        "hour_cos": math.cos(2 * math.pi * h / 24),
+        "dow_sin": math.sin(2 * math.pi * dow / 7),
+        "dow_cos": math.cos(2 * math.pi * dow / 7),
+        "month_sin": math.sin(2 * math.pi * month / 12),
+        "month_cos": math.cos(2 * math.pi * month / 12),
+    }
 
 
 def build_calendar_features(df: pl.DataFrame) -> pl.DataFrame:
