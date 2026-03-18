@@ -80,7 +80,7 @@ def app_client():
         patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
         patch("psycopg2.connect", mock_pg),
     ):
-        import pulsecast.pulsecast.serving.main as main_mod
+        import pulsecast.serving.main as main_mod
 
         importlib.reload(main_mod)
 
