@@ -7,13 +7,21 @@ four columns of interest, and aggregates to hourly pickup counts per zone.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
+import psycopg2
 import requests
 
 logger = logging.getLogger(__name__)
+
+_DSN: str | None = os.getenv("TIMESCALE_DSN")
+
+# Zone-to-route mapping: TLC PULocationID → demand.route_id.
+# When no explicit mapping is present the zone ID is used directly as the route ID.
+_ZONE_TO_ROUTE: dict[int, int] = {}
 
 # Base URL pattern used by the TLC open-data programme.
 _TLC_BASE = (
@@ -93,14 +101,55 @@ def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def write_to_db(df: pl.DataFrame, dsn: str) -> int:
+    """Upsert aggregated hourly counts into the *demand* hypertable.
+
+    Maps ``PULocationID`` to ``route_id`` via :data:`_ZONE_TO_ROUTE`, falling
+    back to the raw zone ID when no explicit mapping exists.
+
+    Returns the number of rows written.
+    """
+    if df.is_empty():
+        return 0
+
+    params = [
+        (
+            _ZONE_TO_ROUTE.get(int(r["PULocationID"]), int(r["PULocationID"])),
+            r["hour"],
+            int(r["pickup_count"]),
+        )
+        for r in df.iter_rows(named=True)
+    ]
+
+    conn = psycopg2.connect(dsn)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO demand (route_id, hour, volume)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (route_id, hour)
+                    DO UPDATE SET volume = EXCLUDED.volume;
+                    """,
+                    params,
+                )
+    finally:
+        conn.close()
+
+    return len(params)
+
+
 def ingest(
     dest_dir: Path = Path("data/raw/tlc"),
     months: int = 24,
     colors: tuple[str, ...] = ("yellow", "green"),
+    dsn: str | None = _DSN,
 ) -> pl.DataFrame:
     """
     Download the last *months* months of TLC data for each *color*,
-    aggregate to hourly counts, and return a combined Polars DataFrame.
+    aggregate to hourly counts, persist to TimescaleDB when *dsn* is provided,
+    and return a combined Polars DataFrame.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     frames: list[pl.DataFrame] = []
@@ -122,12 +171,18 @@ def ingest(
             schema={"PULocationID": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
         )
 
-    combined = pl.concat(frames)
-    return (
-        combined.group_by(["PULocationID", "hour"])
+    combined = (
+        pl.concat(frames)
+        .group_by(["PULocationID", "hour"])
         .agg(pl.col("pickup_count").sum())
         .sort(["PULocationID", "hour"])
     )
+
+    if dsn is not None:
+        written = write_to_db(combined, dsn)
+        logger.info("Wrote %d rows to demand table.", written)
+
+    return combined
 
 
 if __name__ == "__main__":
