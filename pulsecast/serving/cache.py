@@ -68,7 +68,7 @@ class ForecastCache:
             logger.debug("Cache MISS for key=%s", key)
             return None
         logger.debug("Cache HIT for key=%s", key)
-        return json.loads(raw)
+        return json.loads(str(raw))
 
     def set(
         self,
