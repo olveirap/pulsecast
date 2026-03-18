@@ -1,12 +1,18 @@
 """
 calendar.py – Calendar and event features for a given datetime index.
 
-Features produced:
-  - dow            (0=Monday … 6=Sunday)
-  - hour_of_day    (0–23)
-  - week_of_year   (ISO, 1–53)
+Features produced by ``scalar_calendar_features`` (and the batch
+``build_calendar_features``):
+  - hour_of_day              (0–23)
+  - dow                      (0=Monday … 6=Sunday)
+  - month                    (1–12)
+  - week_of_year             (ISO week, 1–53)
+  - is_weekend               (1 if Saturday or Sunday, else 0)
   - days_to_next_us_holiday  (integer days until the next US federal holiday)
-  - nyc_event_flag (1 if the date is a known NYC major-event date, else 0)
+  - nyc_event_flag           (1 if the date is a known NYC major-event date, else 0)
+  - hour_sin / hour_cos      (cyclical encoding, period=24)
+  - dow_sin  / dow_cos       (cyclical encoding, period=7)
+  - month_sin / month_cos    (cyclical encoding, period=12; 0-indexed so Dec↔Jan are adjacent)
 """
 
 from __future__ import annotations
@@ -76,8 +82,8 @@ def scalar_calendar_features(dt: datetime) -> dict[str, float]:
         "hour_cos": math.cos(2 * math.pi * h / 24),
         "dow_sin": math.sin(2 * math.pi * dow / 7),
         "dow_cos": math.cos(2 * math.pi * dow / 7),
-        "month_sin": math.sin(2 * math.pi * month / 12),
-        "month_cos": math.cos(2 * math.pi * month / 12),
+        "month_sin": math.sin(2 * math.pi * (month - 1) / 12),
+        "month_cos": math.cos(2 * math.pi * (month - 1) / 12),
     }
 
 

@@ -92,9 +92,15 @@ _FEATURE_NAMES: list[str] = [
     "disruption_flag",
 ]
 
-assert len(_FEATURE_NAMES) == _N_FEATURES, (
-    f"Expected {_N_FEATURES} feature names, got {len(_FEATURE_NAMES)}"
-)
+if len(_FEATURE_NAMES) != _N_FEATURES:
+    raise RuntimeError(
+        f"N_FEATURES={_N_FEATURES} (from env) but _FEATURE_NAMES has "
+        f"{len(_FEATURE_NAMES)} entries; update N_FEATURES or _FEATURE_NAMES to match."
+    )
+
+# Slice bounds for the calendar feature block within _FEATURE_NAMES.
+_CALENDAR_START: int = 3   # first calendar feature index
+_CALENDAR_END: int = 16    # one past the last calendar feature index (13 features)
 
 # ---------------------------------------------------------------------------
 # Application
@@ -126,6 +132,7 @@ def _fetch_delay_index(route_id: int) -> float:
     Retrieve the latest delay_index for *route_id* from Redis (via cache)
     or fall back to TimescaleDB.
     """
+    conn = None
     try:
         conn = psycopg2.connect(_DB_DSN)
         with conn:
@@ -141,11 +148,13 @@ def _fetch_delay_index(route_id: int) -> float:
                     (route_id,),
                 )
                 row = cur.fetchone()
-        conn.close()
         if row:
             return float(row[0])
     except Exception:
         logger.exception("Failed to fetch delay_index from TimescaleDB")
+    finally:
+        if conn is not None:
+            conn.close()
     return 0.0
 
 
@@ -157,6 +166,7 @@ def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     Returns a float32 array sorted oldest-first (index 0 = oldest hour,
     index -1 = most recent hour).  Returns an empty array on error.
     """
+    conn = None
     try:
         conn = psycopg2.connect(_DB_DSN)
         with conn:
@@ -172,12 +182,14 @@ def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
                     (route_id, n_hours),
                 )
                 rows = cur.fetchall()
-        conn.close()
         if rows:
             # rows are newest-first; reverse to oldest-first
             return np.array([float(r[0]) for r in reversed(rows)], dtype=np.float32)
     except Exception:
         logger.exception("Failed to fetch demand history from TimescaleDB")
+    finally:
+        if conn is not None:
+            conn.close()
     return np.empty(0, dtype=np.float32)
 
 
@@ -189,6 +201,7 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     Returns a float32 array sorted oldest-first (index 0 = oldest hour,
     index -1 = most recent hour).  Returns an empty array on error.
     """
+    conn = None
     try:
         conn = psycopg2.connect(_DB_DSN)
         with conn:
@@ -204,72 +217,48 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
                     (route_id, n_hours),
                 )
                 rows = cur.fetchall()
-        conn.close()
         if rows:
             # rows are newest-first; reverse to oldest-first
             return np.array([float(r[0]) for r in reversed(rows)], dtype=np.float32)
     except Exception:
         logger.exception("Failed to fetch congestion history from TimescaleDB")
+    finally:
+        if conn is not None:
+            conn.close()
     return np.empty(0, dtype=np.float32)
 
 
-def _build_feature_vector(
+def _build_static_features(
     route_id: int,
-    horizon_hours: int,
     delay_index: float,
     demand_history: np.ndarray,
     congestion_history: np.ndarray,
 ) -> np.ndarray:
     """
-    Construct a 42-dimensional feature vector for ONNX inference.
+    Build the feature slots that do not depend on *horizon_hours* or calendar.
 
-    Feature layout matches *_FEATURE_NAMES* (see module constant):
-      [0-2]   Basic: route_id, horizon_hours, delay_index
-      [3-15]  Calendar (target hour): hour_of_day, dow, month, week_of_year,
-              is_weekend, days_to_next_us_holiday, nyc_event_flag,
-              hour_sin, hour_cos, dow_sin, dow_cos, month_sin, month_cos
+    Populates indices:
+      [0]     route_id
+      [2]     delay_index (live)
       [16-27] Demand lags (1,2,3,6,12,24,48,72,96,120,144,168 h)
       [28-34] Rolling means of demand (3,6,12,24,48,72,168 h)
       [35-36] EWM trend of demand (span=24, span=168)
-      [37]    YoY ratio (0.0 when < 8760 h of history is available)
+      [37]    YoY ratio (0.0 sentinel when < 8760 h of history)
       [38-41] Congestion: delay_index_lag1, delay_index_lag24,
               delay_index_rolling3h, disruption_flag
 
-    Parameters
-    ----------
-    route_id : int
-    horizon_hours : int
-        Number of hours ahead being predicted.
-    delay_index : float
-        Current (live) delay_index for the zone.
-    demand_history : np.ndarray
-        Float32 array of demand volumes sorted oldest-first (up to 168 values).
-        Missing values default to 0.0.
-    congestion_history : np.ndarray
-        Float32 array of delay_index values sorted oldest-first (up to 168 values).
-        Missing values default to 0.0.
+    Indices 1 (horizon_hours) and 3-15 (calendar) are left at 0.0 for
+    ``_build_feature_vector`` to fill per horizon step.
 
     Returns
     -------
-    np.ndarray of shape (1, N_FEATURES)
+    np.ndarray of shape (_N_FEATURES,)
     """
     features = np.zeros(_N_FEATURES, dtype=np.float32)
 
-    # ── Basic ──────────────────────────────────────────────────────────────
+    # ── Basic (static part) ────────────────────────────────────────────────
     features[0] = float(route_id)
-    features[1] = float(horizon_hours)
     features[2] = float(delay_index)
-
-    # ── Calendar features for the target prediction hour ───────────────────
-    target_dt = datetime.now(tz=UTC) + timedelta(hours=horizon_hours)
-    cal = scalar_calendar_features(target_dt)
-    cal_keys = [
-        "hour_of_day", "dow", "month", "week_of_year", "is_weekend",
-        "days_to_next_us_holiday", "nyc_event_flag",
-        "hour_sin", "hour_cos", "dow_sin", "dow_cos", "month_sin", "month_cos",
-    ]
-    for i, key in enumerate(cal_keys):
-        features[3 + i] = float(cal[key])
 
     # ── Demand lag features ────────────────────────────────────────────────
     n_d = len(demand_history)
@@ -283,7 +272,6 @@ def _build_feature_vector(
             features[28 + i] = float(np.mean(demand_history[-window:]))
         elif n_d > 0:
             features[28 + i] = float(np.mean(demand_history))
-        # else: already 0.0 from np.zeros initialisation
 
     # ── EWM trend (span=24 and span=168, adjust=False) ────────────────────
     if n_d > 0:
@@ -297,10 +285,9 @@ def _build_feature_vector(
             ewm168 = alpha168 * fv + (1.0 - alpha168) * ewm168
         features[35] = float(ewm24)
         features[36] = float(ewm168)
-    # else: already 0.0
 
-    # ── YoY ratio – 0.0 when fewer than 8760 h of history are available ───
-    # features[37] stays 0.0 (sentinel value; model trained to handle it)
+    # ── YoY ratio – 0.0 sentinel when fewer than 8760 h of history ────────
+    # features[37] stays 0.0
 
     # ── Congestion features ────────────────────────────────────────────────
     n_c = len(congestion_history)
@@ -314,7 +301,39 @@ def _build_feature_vector(
         mean168 = float(np.mean(congestion_history[-168:]))
         std168 = float(np.std(congestion_history[-168:]))
         features[41] = 1.0 if float(congestion_history[-1]) > mean168 + 2.0 * std168 else 0.0
-    # else: disruption_flag = 0.0
+
+    return features
+
+
+def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np.ndarray:
+    """
+    Assemble the final 42-dimensional feature vector for a single *horizon_hours*
+    step by filling the horizon-dependent slots into a copy of *static_features*.
+
+    Populates indices:
+      [1]    horizon_hours
+      [3-15] Calendar features for the target prediction hour (derived from
+             _FEATURE_NAMES[3:16] to avoid duplication)
+
+    Parameters
+    ----------
+    horizon_hours : int
+        Number of hours ahead being predicted.
+    static_features : np.ndarray
+        Shape (_N_FEATURES,) array from ``_build_static_features``.
+
+    Returns
+    -------
+    np.ndarray of shape (1, N_FEATURES)
+    """
+    features = static_features.copy()
+    features[1] = float(horizon_hours)
+
+    # Calendar features – keys derived from _FEATURE_NAMES to stay in sync.
+    target_dt = datetime.now(tz=UTC) + timedelta(hours=horizon_hours)
+    cal = scalar_calendar_features(target_dt)
+    for i, key in enumerate(_FEATURE_NAMES[_CALENDAR_START:_CALENDAR_END]):
+        features[_CALENDAR_START + i] = float(cal[key])
 
     # ── Validate output length ─────────────────────────────────────────────
     if features.shape[0] != _N_FEATURES:
@@ -371,12 +390,15 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     demand_history = _fetch_demand_history(request.route_id)
     congestion_history = _fetch_congestion_history(request.route_id)
 
+    # Pre-compute history-derived features once (independent of horizon / calendar)
+    static_features = _build_static_features(
+        request.route_id, delay_index, demand_history, congestion_history
+    )
+
     # 4. Run ONNX inference (one prediction per horizon step)
     p10_list, p50_list, p90_list = [], [], []
     for h in range(1, horizon_hours + 1):
-        features = _build_feature_vector(
-            request.route_id, h, delay_index, demand_history, congestion_history
-        )
+        features = _build_feature_vector(h, static_features)
         preds = _run_onnx(features)
         p10_list.append(preds["p10"])
         p50_list.append(preds["p50"])
