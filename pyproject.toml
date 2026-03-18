@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Probabilistic shipment demand forecasting using NYC TLC trip records and live MTA GTFS-Realtime congestion signals."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 authors = [
   { name = "Paulo Olveira" },
 ]
