@@ -9,7 +9,7 @@ S3 key layout assumed::
 
 Usage::
 
-    python -m data.ingest.gtfs_rt_backfill \\
+    python -m pulsecast.data.ingest.gtfs_rt_backfill \\
         --start 2023-01-01 \\
         --end   2024-06-30
 
@@ -33,7 +33,7 @@ from botocore.exceptions import ClientError
 from google.protobuf.message import DecodeError
 from google.transit import gtfs_realtime_pb2
 
-from data.ingest.gtfs_rt import _compute_delay_index, _upsert_rows
+from pulsecast.data.ingest.gtfs_rt import _compute_delay_index, _upsert_rows
 
 logger = logging.getLogger(__name__)
 

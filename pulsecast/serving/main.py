@@ -22,8 +22,8 @@ import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-from serving.cache import ForecastCache
-from serving.schemas import ForecastRequest, ForecastResponse
+from pulsecast.serving.cache import ForecastCache
+from pulsecast.serving.schemas import ForecastRequest, ForecastResponse
 
 logger = logging.getLogger(__name__)
 
