@@ -18,7 +18,6 @@ import numpy as np
 
 if TYPE_CHECKING:
     from pulsecast.models.lgbm import LGBMForecaster
-
 logger = logging.getLogger(__name__)
 
 _QUANTILE_NAMES = ("p10", "p50", "p90")

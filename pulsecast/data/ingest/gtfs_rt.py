@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
-import datetime as dt
-from datetime import datetime
+from datetime import datetime, timezone
 
 import psycopg2
 import requests
@@ -78,7 +77,7 @@ def _compute_delay_index(
                 continue
 
             # Use feed timestamp to determine the hour bucket.
-            ts = datetime.fromtimestamp(feed.header.timestamp, tz=dt.UTC)
+            ts = datetime.fromtimestamp(feed.header.timestamp, tz=timezone.utc)
             hour = ts.replace(minute=0, second=0, microsecond=0)
             key = (zone_id, hour)
             zone_delays.setdefault(key, []).append(delay_sec)
