@@ -1,0 +1,195 @@
+"""
+tests/test_api.py – FastAPI endpoint tests with mocked ONNX models and DB.
+
+All heavy external dependencies (Redis, TimescaleDB, onnxruntime) are fully
+mocked so that the tests run offline without any infrastructure.
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+import sys
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+from fastapi.testclient import TestClient
+
+# ---------------------------------------------------------------------------
+# Helpers to build mock modules
+# ---------------------------------------------------------------------------
+
+
+def _make_redis_module() -> tuple[MagicMock, MagicMock]:
+    """Return (redis_module_mock, redis_client_mock)."""
+    redis_client = MagicMock()
+    redis_client.get.return_value = None  # default: cache miss
+    redis_module = MagicMock()
+    redis_module.from_url.return_value = redis_client
+    return redis_module, redis_client
+
+
+def _make_ort_module() -> MagicMock:
+    """Return a mock onnxruntime module with canned InferenceSession."""
+
+    def _fake_session(path: str) -> MagicMock:
+        sess = MagicMock()
+        sess.get_inputs.return_value = [MagicMock(name="X")]
+        sess.run.return_value = [np.array([[1.0]])]
+        return sess
+
+    ort_module = MagicMock()
+    ort_module.InferenceSession.side_effect = _fake_session
+    return ort_module
+
+
+# ---------------------------------------------------------------------------
+# App fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def app_client():
+    """
+    Return (TestClient, serving.main module) with all external I/O mocked:
+      - onnxruntime   → MagicMock InferenceSession returning fixed predictions
+      - redis         → MagicMock client (cache always misses by default)
+      - psycopg2      → MagicMock connection returning delay_index=0.5
+    """
+    redis_module, redis_client = _make_redis_module()
+    ort_module = _make_ort_module()
+
+    # Remove any previously cached serving modules.
+    for mod_name in list(sys.modules):
+        if mod_name.startswith("serving"):
+            del sys.modules[mod_name]
+
+    mock_pg = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = (0.5,)
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = lambda s: s
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_pg.return_value = mock_conn
+
+    with (
+        patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
+        patch("psycopg2.connect", mock_pg),
+    ):
+        import serving.main as main_mod
+
+        importlib.reload(main_mod)
+
+        with TestClient(main_mod.app, raise_server_exceptions=False) as client:
+            yield client, main_mod, redis_client
+
+
+# ---------------------------------------------------------------------------
+# Health endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_health_returns_ok(app_client):
+    client, _, _rc = app_client
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# POST /forecast – happy path
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_returns_200_for_valid_request(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 132, "horizon": 1})
+    assert resp.status_code == 200
+
+
+def test_forecast_response_schema(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 132, "horizon": 1})
+    data = resp.json()
+    assert "route_id" in data
+    assert "horizon" in data
+    assert "p10" in data
+    assert "p50" in data
+    assert "p90" in data
+
+
+def test_forecast_echoes_route_id_and_horizon(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 5, "horizon": 3})
+    data = resp.json()
+    assert data["route_id"] == 5
+    assert data["horizon"] == 3
+
+
+def test_forecast_p_list_length_equals_horizon_times_24(app_client):
+    """Each quantile list must have horizon × 24 entries."""
+    client, _, _rc = app_client
+    horizon = 2
+    resp = client.post("/forecast", json={"route_id": 1, "horizon": horizon})
+    data = resp.json()
+    assert len(data["p10"]) == horizon * 24
+    assert len(data["p50"]) == horizon * 24
+    assert len(data["p90"]) == horizon * 24
+
+
+def test_forecast_includes_latency_header(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 1, "horizon": 1})
+    assert "X-Latency-Ms" in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# POST /forecast – validation errors
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_rejects_horizon_zero(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 1, "horizon": 0})
+    assert resp.status_code == 422
+
+
+def test_forecast_rejects_horizon_too_large(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": 1, "horizon": 8})
+    assert resp.status_code == 422
+
+
+def test_forecast_rejects_negative_route_id(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={"route_id": -1, "horizon": 1})
+    assert resp.status_code == 422
+
+
+def test_forecast_rejects_missing_body(app_client):
+    client, _, _rc = app_client
+    resp = client.post("/forecast", json={})
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /forecast – cache hit path
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_serves_cached_result(app_client):
+    """When the cache returns a payload, it must be reflected in the response."""
+    client, _main_mod, redis_client = app_client
+    cached_payload: dict[str, Any] = {"p10": [9.9], "p50": [19.9], "p90": [29.9]}
+    redis_client.get.return_value = json.dumps(cached_payload)
+
+    resp = client.post("/forecast", json={"route_id": 7, "horizon": 1})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["p10"] == [9.9]
+    assert data["p50"] == [19.9]
+    assert data["p90"] == [29.9]
