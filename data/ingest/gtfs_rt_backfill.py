@@ -105,7 +105,10 @@ def _fetch_archive(s3_client, key: str) -> gtfs_realtime_pb2.FeedMessage | None:
             )
             feed.header.timestamp = ts
         except (ValueError, IndexError):
-            pass
+            logger.warning(
+                "Cannot derive timestamp from key path %r – skipping file.", key
+            )
+            return None
 
     return feed
 
@@ -171,7 +174,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--end",
-        default=str(date.today()),
+        default=date.today(),
         type=date.fromisoformat,
         help="End date in ISO format (YYYY-MM-DD), inclusive. Defaults to today.",
     )

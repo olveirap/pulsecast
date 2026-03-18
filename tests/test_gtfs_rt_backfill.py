@@ -85,8 +85,6 @@ def test_s3_key_no_prefix():
 
 
 def test_s3_key_with_prefix(monkeypatch):
-    monkeypatch.setenv("BACKFILL_PREFIX", "feeds/mta")
-    # Re-import to pick up env var, or call with explicit prefix via env patching
     import data.ingest.gtfs_rt_backfill as mod
 
     monkeypatch.setattr(mod, "_PREFIX", "feeds/mta")
@@ -144,6 +142,20 @@ def test_fetch_archive_injects_timestamp_when_zero():
     assert feed is not None
     expected_ts = int(datetime(2024, 3, 7, 14, 0, 0, tzinfo=UTC).timestamp())
     assert feed.header.timestamp == expected_ts
+
+
+def test_fetch_archive_returns_none_when_timestamp_unparseable():
+    from data.ingest.gtfs_rt_backfill import _fetch_archive
+
+    # Feed with timestamp=0 and a key that has no parseable date components.
+    payload = _make_feed_bytes(0, [("101", 10)])
+
+    s3_mock = MagicMock()
+    s3_mock.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=payload))}
+
+    # Key with too few path segments – cannot extract YYYY/MM/DD/HH.
+    feed = _fetch_archive(s3_mock, "gtfs_rt.pb")
+    assert feed is None
 
 
 # ---------------------------------------------------------------------------
@@ -221,11 +233,17 @@ def test_backfill_skips_missing_objects():
 
 
 def test_parse_args_defaults():
-    args = _parse_args(["--start", "2023-01-01"])
+    args = _parse_args(["--start", "2023-01-01", "--end", "2023-12-31"])
     assert args.start == date(2023, 1, 1)
-    assert args.end == date.today()
+    assert args.end == date(2023, 12, 31)
     assert args.profile is None
     assert args.dry_run is False
+
+
+def test_parse_args_default_end_is_date(monkeypatch):
+    """--end default must be a date object, not a string, so comparisons work."""
+    args = _parse_args(["--start", "2023-01-01"])
+    assert isinstance(args.end, date)
 
 
 def test_parse_args_explicit_end():
