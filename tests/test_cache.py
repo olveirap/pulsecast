@@ -54,9 +54,9 @@ class TestBucketDelay:
         assert isinstance(result, float)
 
     def test_precision_capped_at_6_decimals(self):
-        # The function rounds to 6 decimal places – result must not be absurdly long.
+        # _bucket_delay rounds to 6 decimal places; result must equal itself rounded.
         result = _bucket_delay(0.1)
-        assert len(str(result).split(".")[-1]) <= 7  # at most 7 chars after "."
+        assert result == round(result, 6)
 
 
 # ---------------------------------------------------------------------------

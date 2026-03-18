@@ -53,7 +53,7 @@ def _make_ort_module() -> MagicMock:
 @pytest.fixture()
 def app_client():
     """
-    Return (TestClient, serving.main module) with all external I/O mocked:
+    Yield (TestClient, serving.main module, redis_client) with all external I/O mocked:
       - onnxruntime   → MagicMock InferenceSession returning fixed predictions
       - redis         → MagicMock client (cache always misses by default)
       - psycopg2      → MagicMock connection returning delay_index=0.5

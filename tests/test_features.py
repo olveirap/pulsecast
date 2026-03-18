@@ -9,7 +9,7 @@ Covers:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import polars as pl
 import pytest
@@ -23,10 +23,11 @@ from features.demand import build_demand_features
 # ---------------------------------------------------------------------------
 
 _HOUR_START = datetime(2024, 3, 17, 0, 0, 0)  # St. Patrick's Day (NYC event)
+_BASE_HOUR = datetime(2024, 1, 1, 0, 0, 0)
 
 
 def _demand_df(n: int = 30, route_ids: list[int] | None = None) -> pl.DataFrame:
-    """Build a minimal demand DataFrame with *n* hourly rows per route."""
+    """Build a minimal demand DataFrame with *n* truly hourly rows per route."""
     if route_ids is None:
         route_ids = [1]
     rows = []
@@ -35,7 +36,7 @@ def _demand_df(n: int = 30, route_ids: list[int] | None = None) -> pl.DataFrame:
             rows.append(
                 {
                     "route_id": rid,
-                    "hour": datetime(2024, 1, 1, i % 24, 0, 0),
+                    "hour": _BASE_HOUR + timedelta(hours=i),
                     "volume": float(i + 1),
                 }
             )
@@ -93,9 +94,16 @@ def test_demand_no_cross_route_leakage():
 
 
 def test_demand_yoy_ratio_clipped():
-    """yoy_ratio must stay within [0.01, 100]."""
-    df = build_demand_features(_demand_df(n=50))
+    """yoy_ratio must stay within [0.01, 100] for any non-null entries."""
+    # Need > 8760 rows per route so that the 8760-step shift yields non-null values.
+    n = 8762
+    rows = [
+        {"route_id": 1, "hour": _BASE_HOUR + timedelta(hours=i), "volume": float(i % 100 + 1)}
+        for i in range(n)
+    ]
+    df = build_demand_features(pl.DataFrame(rows))
     ratios = df["yoy_ratio"].drop_nulls()
+    assert len(ratios) > 0, "Expected non-null yoy_ratio values with n > 8760 rows"
     assert (ratios >= 0.01).all()
     assert (ratios <= 100.0).all()
 
@@ -176,7 +184,7 @@ def _congestion_df(n: int = 20, zone_ids: list[int] | None = None) -> pl.DataFra
             rows.append(
                 {
                     "zone_id": zid,
-                    "hour": datetime(2024, 1, 1, i % 24, 0, 0),
+                    "hour": _BASE_HOUR + timedelta(hours=i),
                     "delay_index": float(i % 5) * 0.4,
                 }
             )
