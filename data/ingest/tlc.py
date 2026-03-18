@@ -8,19 +8,21 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from pathlib import Path
 
 import polars as pl
 import psycopg2
 import requests
+from psycopg2.extras import execute_values
 
 logger = logging.getLogger(__name__)
 
 _DSN: str | None = os.getenv("TIMESCALE_DSN")
 
 # Zone-to-route mapping: TLC PULocationID → demand.route_id.
-# When no explicit mapping is present the zone ID is used directly as the route ID.
+# Currently empty, so every zone ID is used as its own route_id (identity fallback).
+# Populate this dict to remap specific zones to logical route identifiers.
 _ZONE_TO_ROUTE: dict[int, int] = {}
 
 # Base URL pattern used by the TLC open-data programme.
@@ -105,7 +107,9 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
     """Upsert aggregated hourly counts into the *demand* hypertable.
 
     Maps ``PULocationID`` to ``route_id`` via :data:`_ZONE_TO_ROUTE`, falling
-    back to the raw zone ID when no explicit mapping exists.
+    back to the raw zone ID when no explicit mapping exists.  The ``hour``
+    column is made explicitly UTC-aware before insertion so that it aligns
+    correctly with the ``TIMESTAMPTZ`` column type.
 
     Returns the number of rows written.
     """
@@ -115,7 +119,7 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
     params = [
         (
             _ZONE_TO_ROUTE.get(int(r["PULocationID"]), int(r["PULocationID"])),
-            r["hour"],
+            r["hour"].replace(tzinfo=UTC),
             int(r["pickup_count"]),
         )
         for r in df.iter_rows(named=True)
@@ -125,10 +129,11 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.executemany(
+                execute_values(
+                    cur,
                     """
                     INSERT INTO demand (route_id, hour, volume)
-                    VALUES (%s, %s, %s)
+                    VALUES %s
                     ON CONFLICT (route_id, hour)
                     DO UPDATE SET volume = EXCLUDED.volume;
                     """,
