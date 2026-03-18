@@ -1,14 +1,22 @@
-.PHONY: ingest features train export serve test
+.PHONY: ingest backfill features train export serve test
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PYTHON   ?= python
 UV       ?= uv
 MONTHS   ?= 24
 HORIZON  ?= 7
+BACKFILL_START ?= $(shell date -d '18 months ago' +%Y-%m-%d 2>/dev/null || date -v-18m +%Y-%m-%d)
+BACKFILL_END   ?= $(shell date +%Y-%m-%d)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest:
 	$(PYTHON) -m data.ingest.tlc
+
+# ── GTFS-RT backfill ─────────────────────────────────────────────────────────
+backfill:
+	$(PYTHON) -m data.ingest.gtfs_rt_backfill \
+		--start $(BACKFILL_START) \
+		--end   $(BACKFILL_END)
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:
