@@ -23,9 +23,9 @@ import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
-from features.calendar import scalar_calendar_features
-from serving.cache import ForecastCache
-from serving.schemas import ForecastRequest, ForecastResponse
+from pulsecast.features.calendar import scalar_calendar_features
+from pulsecast.serving.cache import ForecastCache
+from pulsecast.serving.schemas import ForecastRequest, ForecastResponse
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,8 @@ _DB_DSN = os.getenv(
     "TIMESCALE_DSN",
     "postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast",
 )
-_N_FEATURES = int(os.getenv("N_FEATURES", "42"))
 
-# Canonical ordered feature names – must stay in sync with _build_feature_vector.
+# Canonical ordered feature names – must stay in sync with _build_feature_matrix.
 _FEATURE_NAMES: list[str] = [
     # ── Basic (3) ──────────────────────────────────────────────────────────
     "route_id",
@@ -92,10 +91,14 @@ _FEATURE_NAMES: list[str] = [
     "disruption_flag",
 ]
 
-if len(_FEATURE_NAMES) != _N_FEATURES:
+_N_FEATURES: int = len(_FEATURE_NAMES)
+
+# Env-var override: reject mismatches at startup rather than silently
+_N_FEATURES_ENV = int(os.getenv("N_FEATURES", str(_N_FEATURES)))
+if _N_FEATURES_ENV != _N_FEATURES:
     raise RuntimeError(
-        f"N_FEATURES={_N_FEATURES} (from env) but _FEATURE_NAMES has "
-        f"{len(_FEATURE_NAMES)} entries; update N_FEATURES or _FEATURE_NAMES to match."
+        f"N_FEATURES={_N_FEATURES_ENV} (from env) but _FEATURE_NAMES has "
+        f"{_N_FEATURES} entries; update N_FEATURES or _FEATURE_NAMES to match."
     )
 
 # Slice bounds for the calendar feature block within _FEATURE_NAMES.
@@ -129,8 +132,7 @@ except Exception:
 
 def _fetch_delay_index(route_id: int) -> float:
     """
-    Retrieve the latest delay_index for *route_id* from Redis (via cache)
-    or fall back to TimescaleDB.
+    Retrieve the latest delay_index for *route_id* from TimescaleDB.
     """
     conn = None
     try:
@@ -307,24 +309,18 @@ def _build_static_features(
 
 def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np.ndarray:
     """
-    Assemble the final 42-dimensional feature vector for a single *horizon_hours*
-    step by filling the horizon-dependent slots into a copy of *static_features*.
+    Assemble the final _N_FEATURES-dimensional feature vector for a single
+    *horizon_hours* step by filling the horizon-dependent slots into a copy
+    of *static_features*.
 
     Populates indices:
       [1]    horizon_hours
       [3-15] Calendar features for the target prediction hour (derived from
-             _FEATURE_NAMES[3:16] to avoid duplication)
-
-    Parameters
-    ----------
-    horizon_hours : int
-        Number of hours ahead being predicted.
-    static_features : np.ndarray
-        Shape (_N_FEATURES,) array from ``_build_static_features``.
+             _FEATURE_NAMES[_CALENDAR_START:_CALENDAR_END])
 
     Returns
     -------
-    np.ndarray of shape (1, N_FEATURES)
+    np.ndarray of shape (1, _N_FEATURES)
     """
     features = static_features.copy()
     features[1] = float(horizon_hours)
@@ -335,7 +331,6 @@ def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np
     for i, key in enumerate(_FEATURE_NAMES[_CALENDAR_START:_CALENDAR_END]):
         features[_CALENDAR_START + i] = float(cal[key])
 
-    # ── Validate output length ─────────────────────────────────────────────
     if features.shape[0] != _N_FEATURES:
         raise ValueError(
             f"Feature vector length {features.shape[0]} != N_FEATURES {_N_FEATURES}"
@@ -344,14 +339,49 @@ def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np
     return features.reshape(1, -1)
 
 
-def _run_onnx(features: np.ndarray) -> dict[str, float]:
+def _build_feature_matrix(
+    route_id: int,
+    horizon_hours: int,
+    delay_index: float,
+    demand_history: np.ndarray | None = None,
+    congestion_history: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Construct a batch feature matrix for all horizon steps in one shot.
+
+    Fetches real demand and congestion history from TimescaleDB (when
+    *demand_history* / *congestion_history* are provided, uses those directly
+    to avoid redundant DB calls from the caller).
+
+    Returns an array of shape ``(horizon_hours, _N_FEATURES)`` where row ``i``
+    corresponds to the forecast step ``i + 1`` hours ahead.
+    """
+    if demand_history is None:
+        demand_history = np.empty(0, dtype=np.float32)
+    if congestion_history is None:
+        congestion_history = np.empty(0, dtype=np.float32)
+
+    static = _build_static_features(route_id, delay_index, demand_history, congestion_history)
+    rows = [_build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)]
+    return np.array(rows, dtype=np.float32)
+
+
+def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
+    """Run each quantile ONNX session exactly once with the full batch matrix.
+
+    Args:
+        features: Array of shape ``(horizon_hours, _N_FEATURES)``.
+
+    Returns:
+        Mapping of quantile name → list of ``horizon_hours`` predictions.
+    """
     if not _sessions:
         raise HTTPException(status_code=503, detail="ONNX models not loaded.")
-    results: dict[str, float] = {}
+    results: dict[str, list[float]] = {}
     for q_name, sess in _sessions.items():
         input_name = sess.get_inputs()[0].name
         out = sess.run(None, {input_name: features})[0].flatten()
-        results[q_name] = float(out[0])
+        results[q_name] = out.tolist()
     return results
 
 
@@ -390,24 +420,16 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     demand_history = _fetch_demand_history(request.route_id)
     congestion_history = _fetch_congestion_history(request.route_id)
 
-    # Pre-compute history-derived features once (independent of horizon / calendar)
-    static_features = _build_static_features(
-        request.route_id, delay_index, demand_history, congestion_history
+    # 4. Build batch feature matrix and run inference – exactly 3 ONNX calls total
+    features = _build_feature_matrix(
+        request.route_id, horizon_hours, delay_index, demand_history, congestion_history
     )
-
-    # 4. Run ONNX inference (one prediction per horizon step)
-    p10_list, p50_list, p90_list = [], [], []
-    for h in range(1, horizon_hours + 1):
-        features = _build_feature_vector(h, static_features)
-        preds = _run_onnx(features)
-        p10_list.append(preds["p10"])
-        p50_list.append(preds["p50"])
-        p90_list.append(preds["p90"])
+    preds = _run_onnx(features)
 
     payload: dict[str, Any] = {
-        "p10": p10_list,
-        "p50": p50_list,
-        "p90": p90_list,
+        "p10": preds["p10"],
+        "p50": preds["p50"],
+        "p90": preds["p90"],
     }
 
     # 5. Store in cache

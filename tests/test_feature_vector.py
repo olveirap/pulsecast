@@ -1,5 +1,5 @@
 """
-test_feature_vector.py – Unit tests for serving/main.py feature-vector helpers.
+test_feature_vector.py – Unit tests for pulsecast/serving/main.py feature-vector helpers.
 
 Tests mock the TimescaleDB connection so no live database is required.
 """
@@ -27,7 +27,7 @@ redis_stub = types.ModuleType("redis")
 redis_stub.from_url = MagicMock(return_value=MagicMock())  # type: ignore[attr-defined]
 sys.modules.setdefault("redis", redis_stub)
 
-from serving.main import (  # noqa: E402
+from pulsecast.serving.main import (  # noqa: E402
     _N_FEATURES,
     _build_feature_vector,
     _build_static_features,
@@ -199,7 +199,7 @@ class TestMonthCyclicalEncoding:
         """Return (month_sin, month_cos) from scalar_calendar_features for a date in *month*."""
         from datetime import UTC, datetime
 
-        from features.calendar import scalar_calendar_features
+        from pulsecast.features.calendar import scalar_calendar_features
 
         dt = datetime(2025, month, 15, 12, 0, 0, tzinfo=UTC)
         cal = scalar_calendar_features(dt)
@@ -239,7 +239,7 @@ class TestFetchDemandHistory:
         # DB returns newest-first: rows are (167,), (166,), ..., (0,)
         rows = [(float(168 - i),) for i in range(1, 169)]  # 167, 166, ..., 0
         conn_mock = _make_psycopg2_mock(rows)
-        with patch("serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
             result = _fetch_demand_history(132, n_hours=168)
         assert result.shape == (168,)
         assert result.dtype == np.float32
@@ -248,14 +248,14 @@ class TestFetchDemandHistory:
         assert float(result[-1]) == pytest.approx(167.0)
 
     def test_returns_empty_on_db_error(self):
-        with patch("serving.main.psycopg2.connect", side_effect=Exception("DB down")):
+        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=Exception("DB down")):
             result = _fetch_demand_history(1)
         assert isinstance(result, np.ndarray)
         assert len(result) == 0
 
     def test_returns_empty_when_no_rows(self):
         conn_mock = _make_psycopg2_mock([])
-        with patch("serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
             result = _fetch_demand_history(999)
         assert len(result) == 0
 
@@ -268,7 +268,7 @@ class TestFetchCongestionHistory:
     def test_returns_array_oldest_first(self):
         rows = [(float(i) * 0.1,) for i in range(168, 0, -1)]  # newest-first
         conn_mock = _make_psycopg2_mock(rows)
-        with patch("serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
             result = _fetch_congestion_history(132, n_hours=168)
         assert result.shape == (168,)
         assert result.dtype == np.float32
@@ -276,14 +276,14 @@ class TestFetchCongestionHistory:
         assert float(result[0]) <= float(result[-1])
 
     def test_returns_empty_on_db_error(self):
-        with patch("serving.main.psycopg2.connect", side_effect=Exception("DB down")):
+        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=Exception("DB down")):
             result = _fetch_congestion_history(1)
         assert isinstance(result, np.ndarray)
         assert len(result) == 0
 
     def test_returns_empty_when_no_rows(self):
         conn_mock = _make_psycopg2_mock([])
-        with patch("serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
             result = _fetch_congestion_history(999)
         assert len(result) == 0
 
@@ -312,7 +312,7 @@ class TestFeatureVectorWithMockedDB:
             call_count += 1
             return demand_conn if call_count == 1 else cong_conn
 
-        with patch("serving.main.psycopg2.connect", side_effect=_connect_side_effect):
+        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=_connect_side_effect):
             d_hist = _fetch_demand_history(132)
             c_hist = _fetch_congestion_history(132)
 
@@ -322,3 +322,4 @@ class TestFeatureVectorWithMockedDB:
         assert vec.dtype == np.float32
         # Feature vector must not be all zeros
         assert not np.all(vec == 0.0)
+

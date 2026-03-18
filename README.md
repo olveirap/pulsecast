@@ -1,5 +1,7 @@
 # Pulsecast
 
+[![CI](https://github.com/olveirap/pulsecast/actions/workflows/ci.yml/badge.svg)](https://github.com/olveirap/pulsecast/actions/workflows/ci.yml)
+
 **Probabilistic shipment demand forecasting** using NYC TLC trip records and
 live MTA GTFS-Realtime congestion signals.
 
@@ -43,9 +45,10 @@ flowchart LR
 pulsecast/
 ├── data/
 │   ├── ingest/
-│   │   ├── tlc.py          # Downloads TLC Yellow/Green Parquet files
-│   │   └── gtfs_rt.py      # Polls MTA GTFS-RT, computes delay_index
-│   └── schema.sql          # TimescaleDB hypertable definitions
+│   │   ├── tlc.py              # Downloads TLC Yellow/Green Parquet files
+│   │   ├── gtfs_rt.py          # Polls MTA GTFS-RT, computes delay_index
+│   │   └── gtfs_rt_backfill.py # Backfills delay_index from S3 archives
+│   └── schema.sql              # TimescaleDB hypertable definitions
 ├── features/
 │   ├── demand.py           # Lags, rolling means, EWM trend, YoY ratio
 │   ├── calendar.py         # dow, hour, week, holiday, event flag
@@ -62,7 +65,7 @@ pulsecast/
 ├── dashboard/
 │   └── app.py              # Streamlit fan chart + ablation panel
 ├── docker-compose.yml      # api, gtfs-poller, redis, timescaledb, mlflow
-├── Makefile                # ingest / features / train / export / serve / test
+├── Makefile                # ingest / backfill / features / train / export / serve / test
 ├── pyproject.toml          # Python ≥3.11 dependencies
 ├── ARCHITECTURE.md         # Data flow and component responsibilities
 ├── DECISIONS.md            # ADRs: GTFS-RT covariate, ONNX, cache bucketing
@@ -107,19 +110,71 @@ make ingest
 Downloads the last 24 months of Yellow and Green taxi Parquet files and
 aggregates them to hourly pickup counts per zone.
 
-### 4. Train models
+### 4. Backfill historical GTFS-RT delay index
+
+The live GTFS-RT poller only captures data from the moment it starts running.
+To train models that use the `delay_index` congestion covariate, ~18 months of
+historical data must be backfilled from the MTA GTFS-RT protobuf archives
+stored in S3.
+
+#### S3 access pattern
+
+Archives are stored in the public bucket `s3://mta-gtfs-rt-archives` under the
+key layout:
+
+```
+s3://mta-gtfs-rt-archives/{YYYY}/{MM}/{DD}/{HH}/gtfs_rt.pb
+```
+
+The backfill script uses **boto3** with the standard AWS credential chain
+(environment variables → `~/.aws/credentials` → IAM role).  No special
+permissions beyond `s3:GetObject` and `s3:ListBucket` on the bucket are
+required.
+
+Relevant environment variables:
+
+| Variable           | Default                   | Description                           |
+|--------------------|---------------------------|---------------------------------------|
+| `BACKFILL_BUCKET`  | `mta-gtfs-rt-archives`    | S3 bucket name                        |
+| `BACKFILL_PREFIX`  | *(empty)*                 | Optional key prefix within the bucket |
+| `AWS_REGION`       | `us-east-1`               | AWS region                            |
+| `AWS_PROFILE`      | *(default profile)*       | Named AWS credential profile          |
+
+#### Running the backfill
+
+```bash
+# Default: last 18 months up to today
+make backfill
+
+# Custom date range
+make backfill BACKFILL_START=2023-01-01 BACKFILL_END=2024-06-30
+
+# Or invoke directly for finer control
+python -m data.ingest.gtfs_rt_backfill \
+    --start 2023-01-01 \
+    --end   2024-06-30 \
+    --profile my-aws-profile
+
+# Dry-run: parse and log rows without writing to the database
+python -m data.ingest.gtfs_rt_backfill \
+    --start 2024-01-01 \
+    --end   2024-01-07 \
+    --dry-run
+```
+
+### 5. Train models
 
 ```bash
 make train
 ```
 
-### 5. Export to ONNX
+### 6. Export to ONNX
 
 ```bash
 make export
 ```
 
-### 6. Run the API
+### 7. Run the API
 
 ```bash
 make serve
@@ -144,7 +199,7 @@ curl -s -X POST http://localhost:8000/forecast \
 }
 ```
 
-### 7. Launch the dashboard
+### 8. Launch the dashboard
 
 ```bash
 make dashboard

@@ -5,7 +5,7 @@ Trains a TFT model for 7-day (168-hour) probabilistic demand forecasting.
 
 Usage
 -----
->>> from models.tft import TFTForecaster
+>>> from pulsecast.models.tft import TFTForecaster
 >>> forecaster = TFTForecaster()
 >>> forecaster.fit(train_df)
 >>> predictions = forecaster.predict(val_df)
@@ -105,7 +105,7 @@ class TFTForecaster:
             predict_mode=predict,
         )
 
-    def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> "TFTForecaster":
+    def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> TFTForecaster:
         """
         Train the TFT model.
 
