@@ -1,4 +1,4 @@
-.PHONY: ingest backfill features train export serve test
+.PHONY: ingest backfill build-stop-zone-map features train export serve test
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PYTHON   ?= python
@@ -17,6 +17,9 @@ backfill:
 	$(PYTHON) -m pulsecast.data.ingest.gtfs_rt_backfill \
 		--start $(BACKFILL_START) \
 		--end   $(BACKFILL_END)
+
+build-stop-zone-map:
+	$(PYTHON) scripts/build_stop_zone_map.py
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:

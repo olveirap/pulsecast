@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^python -m ruff check \\.$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        ".venv\\Scripts\\python": true
+    }
+}

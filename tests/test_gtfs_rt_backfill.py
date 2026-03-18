@@ -175,6 +175,7 @@ def test_backfill_dry_run_does_not_upsert():
     mock_session.client.return_value = s3_mock
 
     with (
+        patch("pulsecast.data.ingest.gtfs_rt._STOP_TO_ZONE", {"101": 1, "201": 2}),
         patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
         patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):
@@ -197,6 +198,7 @@ def test_backfill_calls_upsert_when_not_dry_run():
     mock_session.client.return_value = s3_mock
 
     with (
+        patch("pulsecast.data.ingest.gtfs_rt._STOP_TO_ZONE", {"101": 1}),
         patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
         patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):
@@ -218,6 +220,7 @@ def test_backfill_skips_missing_objects():
     mock_session.client.return_value = s3_mock
 
     with (
+        patch("pulsecast.data.ingest.gtfs_rt._STOP_TO_ZONE", {"101": 1}),
         patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
         patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):

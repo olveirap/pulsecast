@@ -6,9 +6,11 @@ TLC zone and truncated hour.  Results are written to TimescaleDB.
 
 from __future__ import annotations
 
+import csv
 import logging
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg2
 import requests
@@ -25,15 +27,46 @@ _DB_DSN = os.getenv(
     "postgresql://pulsecast:pulsecast@localhost:5432/pulsecast",
 )
 
-# MTA stop_id → TLC zone mapping (truncated demo subset; extend as needed).
-# In production this should be loaded from a lookup table in the database.
-_STOP_TO_ZONE: dict[str, int] = {
-    # A few sample entries; a real deployment would load all ~500 zones.
-    "101": 1,
-    "102": 1,
-    "201": 2,
-    "301": 3,
-}
+_DEFAULT_STOP_ZONE_MAP = Path(__file__).resolve().parents[1] / "stop_to_zone.csv"
+
+
+def _load_stop_to_zone(path: str | Path | None = None) -> dict[str, int]:
+    """Load stop_id -> TLC zone mapping from CSV.
+
+    Expected CSV columns: stop_id,zone_id.
+    """
+    csv_path = Path(path or os.getenv("STOP_ZONE_MAP_PATH") or _DEFAULT_STOP_ZONE_MAP)
+    if not csv_path.exists():
+        logger.warning(
+            "Stop-to-zone CSV not found at %s. delay_index rows will be empty until map is generated.",
+            csv_path,
+        )
+        return {}
+
+    mapping: dict[str, int] = {}
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        required = {"stop_id", "zone_id"}
+        if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
+            raise ValueError(
+                f"Invalid stop-zone CSV at {csv_path}: expected columns {sorted(required)}"
+            )
+
+        for row in reader:
+            stop_id = (row.get("stop_id") or "").strip()
+            zone_id_raw = (row.get("zone_id") or "").strip()
+            if not stop_id or not zone_id_raw:
+                continue
+            try:
+                mapping[stop_id] = int(zone_id_raw)
+            except ValueError:
+                logger.debug("Skipping row with non-integer zone_id: %s", row)
+
+    logger.info("Loaded %d stop-to-zone mappings from %s", len(mapping), csv_path)
+    return mapping
+
+
+_STOP_TO_ZONE: dict[str, int] = _load_stop_to_zone()
 
 
 def _fetch_feed() -> gtfs_realtime_pb2.FeedMessage:
