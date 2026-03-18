@@ -21,7 +21,9 @@ from fastapi.testclient import TestClient
 def _make_mock_session(n_rows: int) -> MagicMock:
     """Return a fake onnxruntime.InferenceSession for *n_rows* output rows."""
     sess = MagicMock()
-    sess.get_inputs.return_value = [MagicMock(name="X")]
+    mock_input = MagicMock()
+    mock_input.name = "X"
+    sess.get_inputs.return_value = [mock_input]
     # Simulate returning one prediction per input row.
     sess.run.side_effect = lambda _out, feed: [
         np.ones(n_rows, dtype=np.float32) * 1.0
@@ -95,7 +97,7 @@ def test_run_onnx_calls_each_session_once():
     with patch.object(m, "_sessions", mock_sessions):
         result = m._run_onnx(features)
 
-    for q_name, sess in mock_sessions.items():
+    for sess in mock_sessions.values():
         sess.run.assert_called_once()
 
     assert set(result.keys()) == {"p10", "p50", "p90"}
