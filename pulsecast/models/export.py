@@ -50,12 +50,12 @@ def export_lgbm_to_onnx(
     dict mapping quantile name (``"p10"``, ``"p50"``, ``"p90"``) to Path.
     """
     try:
-        from skl2onnx import convert_sklearn
-        from skl2onnx.common.data_types import FloatTensorType
+        from onnxmltools import convert_lightgbm
+        from onnxmltools.convert.common.data_types import FloatTensorType
     except ImportError as exc:
         raise ImportError(
-            "skl2onnx is required for ONNX export. "
-            "Install it with: pip install skl2onnx onnxruntime"
+            "onnxmltools is required for ONNX export. "
+            "Install it with: pip install onnxmltools onnxruntime"
         ) from exc
 
     try:
@@ -81,7 +81,7 @@ def export_lgbm_to_onnx(
             continue
 
         initial_type = [("float_input", FloatTensorType([None, n_features]))]
-        onnx_model = convert_sklearn(lgbm_model, initial_types=initial_type)
+        onnx_model = convert_lightgbm(lgbm_model.booster_, initial_types=initial_type)
 
         onnx_path = output_dir / f"lgbm_{q_name}.onnx"
         onnx_path.write_bytes(onnx_model.SerializeToString())

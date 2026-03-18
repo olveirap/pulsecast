@@ -90,28 +90,38 @@ def _fetch_delay_index(route_id: int) -> float:
     return 0.0
 
 
-def _build_feature_vector(route_id: int, horizon_hours: int, delay_index: float) -> np.ndarray:
+def _build_feature_matrix(route_id: int, horizon_hours: int, delay_index: float) -> np.ndarray:
     """
-    Construct a simple feature vector for ONNX inference.
+    Construct a batch feature matrix for all horizon steps in one shot.
 
-    In production this would call the feature store; here we return a
-    placeholder vector of the correct shape.
+    Returns an array of shape ``(horizon_hours, N_FEATURES)`` where row ``i``
+    corresponds to the forecast step ``i + 1`` hours ahead.  In production this
+    would call the feature store; here we return a placeholder matrix of the
+    correct shape.
     """
-    features = np.zeros(_N_FEATURES, dtype=np.float32)
-    features[0] = float(route_id)
-    features[1] = float(horizon_hours)
-    features[2] = delay_index
-    return features.reshape(1, -1)
+    batch = np.zeros((horizon_hours, _N_FEATURES), dtype=np.float32)
+    batch[:, 0] = float(route_id)
+    batch[:, 1] = np.arange(1, horizon_hours + 1, dtype=np.float32)
+    batch[:, 2] = delay_index
+    return batch
 
 
-def _run_onnx(features: np.ndarray) -> dict[str, float]:
+def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
+    """Run each quantile ONNX session exactly once with the full batch matrix.
+
+    Args:
+        features: Array of shape ``(horizon_hours, N_FEATURES)``.
+
+    Returns:
+        Mapping of quantile name → list of ``horizon_hours`` predictions.
+    """
     if not _sessions:
         raise HTTPException(status_code=503, detail="ONNX models not loaded.")
-    results: dict[str, float] = {}
+    results: dict[str, list[float]] = {}
     for q_name, sess in _sessions.items():
         input_name = sess.get_inputs()[0].name
         out = sess.run(None, {input_name: features})[0].flatten()
-        results[q_name] = float(out[0])
+        results[q_name] = out.tolist()
     return results
 
 
@@ -146,19 +156,14 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
             headers={"X-Latency-Ms": f"{latency_ms:.1f}"},
         )
 
-    # 3. Run ONNX inference (one prediction per horizon step)
-    p10_list, p50_list, p90_list = [], [], []
-    for h in range(1, horizon_hours + 1):
-        features = _build_feature_vector(request.route_id, h, delay_index)
-        preds = _run_onnx(features)
-        p10_list.append(preds["p10"])
-        p50_list.append(preds["p50"])
-        p90_list.append(preds["p90"])
+    # 3. Build batch feature matrix and run inference – exactly 3 ONNX calls total
+    features = _build_feature_matrix(request.route_id, horizon_hours, delay_index)
+    preds = _run_onnx(features)
 
     payload: dict[str, Any] = {
-        "p10": p10_list,
-        "p50": p50_list,
-        "p90": p90_list,
+        "p10": preds["p10"],
+        "p50": preds["p50"],
+        "p90": preds["p90"],
     }
 
     # 4. Store in cache
