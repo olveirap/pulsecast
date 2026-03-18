@@ -21,7 +21,7 @@ def _rolling_mean(col: str, window: int) -> pl.Expr:
     return (
         pl.col(col)
         .shift(1)
-        .rolling_mean(window_size=window, min_periods=1)
+        .rolling_mean(window_size=window)
         .alias(f"rolling_mean_{window}h")
     )
 
@@ -52,23 +52,23 @@ def build_demand_features(df: pl.DataFrame) -> pl.DataFrame:
             # --- rolling means (excluding current row via shift(1)) ---
             pl.col("volume")
             .shift(1)
-            .rolling_mean(window_size=3, min_periods=1)
+            .rolling_mean(window_size=3)
             .over("route_id")
             .alias("rolling_mean_3h"),
             pl.col("volume")
             .shift(1)
-            .rolling_mean(window_size=24, min_periods=1)
+            .rolling_mean(window_size=24)
             .over("route_id")
             .alias("rolling_mean_24h"),
             pl.col("volume")
             .shift(1)
-            .rolling_mean(window_size=168, min_periods=1)
+            .rolling_mean(window_size=168)
             .over("route_id")
             .alias("rolling_mean_168h"),
             # --- exponentially-weighted mean (span=24) ---
             pl.col("volume")
             .shift(1)
-            .ewm_mean(span=24, min_periods=1, adjust=False)
+            .ewm_mean(span=24, adjust=False)
             .over("route_id")
             .alias("ewm_trend_24h"),
         ]

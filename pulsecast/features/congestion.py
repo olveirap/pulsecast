@@ -37,7 +37,7 @@ def build_congestion_features(df: pl.DataFrame) -> pl.DataFrame:
             # rolling 3-hour mean (excluding current observation)
             pl.col("delay_index")
             .shift(1)
-            .rolling_mean(window_size=3, min_periods=1)
+            .rolling_mean(window_size=3)
             .over("zone_id")
             .alias("delay_index_rolling3h"),
         ]
@@ -48,12 +48,12 @@ def build_congestion_features(df: pl.DataFrame) -> pl.DataFrame:
         [
             pl.col("delay_index")
             .shift(1)
-            .rolling_mean(window_size=168, min_periods=1)
+            .rolling_mean(window_size=168)
             .over("zone_id")
             .alias("_roll_mean_168"),
             pl.col("delay_index")
             .shift(1)
-            .rolling_std(window_size=168, min_periods=2)
+            .rolling_std(window_size=168)
             .over("zone_id")
             .alias("_roll_std_168"),
         ]
