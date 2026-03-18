@@ -125,7 +125,6 @@ except Exception:
     logger.warning("ONNX models not found – inference will fail until exported.")
     _sessions = {}
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -158,7 +157,6 @@ def _fetch_delay_index(route_id: int) -> float:
         if conn is not None:
             conn.close()
     return 0.0
-
 
 def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     """
@@ -194,7 +192,6 @@ def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
             conn.close()
     return np.empty(0, dtype=np.float32)
 
-
 def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     """
     Fetch the last *n_hours* of delay_index values for zone *route_id* from
@@ -228,7 +225,6 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
         if conn is not None:
             conn.close()
     return np.empty(0, dtype=np.float32)
-
 
 def _build_static_features(
     route_id: int,
@@ -291,7 +287,7 @@ def _build_static_features(
     # ── YoY ratio – 0.0 sentinel when fewer than 8760 h of history ────────
     # features[37] stays 0.0
 
-    # ── Congestion features ────────────────────────────────────────────────
+    # ── Congestion features ───────────────────────────────────────────────
     n_c = len(congestion_history)
     features[38] = float(congestion_history[-1]) if n_c >= 1 else 0.0  # lag1
     features[39] = float(congestion_history[-24]) if n_c >= 24 else 0.0  # lag24
@@ -305,7 +301,6 @@ def _build_static_features(
         features[41] = 1.0 if float(congestion_history[-1]) > mean168 + 2.0 * std168 else 0.0
 
     return features
-
 
 def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np.ndarray:
     """
@@ -338,7 +333,6 @@ def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np
 
     return features.reshape(1, -1)
 
-
 def _build_feature_matrix(
     route_id: int,
     horizon_hours: int,
@@ -365,7 +359,6 @@ def _build_feature_matrix(
     rows = [_build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)]
     return np.array(rows, dtype=np.float32)
 
-
 def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
     """Run each quantile ONNX session exactly once with the full batch matrix.
 
@@ -384,7 +377,6 @@ def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
         results[q_name] = out.tolist()
     return results
 
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -392,7 +384,6 @@ def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
 
 @app.post("/forecast", response_model=ForecastResponse)
 async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
