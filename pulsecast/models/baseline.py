@@ -50,7 +50,7 @@ class BaselineForecaster:
         self.freq = freq
         self._sf: StatsForecast | None = None
 
-    def fit(self, df: pl.DataFrame) -> "BaselineForecaster":
+    def fit(self, df: pl.DataFrame) -> BaselineForecaster:
         """
         Fit the model.
 

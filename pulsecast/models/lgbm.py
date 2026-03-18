@@ -65,7 +65,7 @@ class LGBMForecaster:
         X: np.ndarray,
         y: np.ndarray,
         eval_set: tuple[np.ndarray, np.ndarray] | None = None,
-    ) -> "LGBMForecaster":
+    ) -> LGBMForecaster:
         """
         Fit one quantile regressor per quantile level.
 
