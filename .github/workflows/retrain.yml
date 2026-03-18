@@ -5,6 +5,10 @@ on:
     - cron: "0 3 * * 1"  # Every Monday at 03:00 UTC
   workflow_dispatch:
 
+concurrency:
+  group: retrain
+  cancel-in-progress: true
+
 jobs:
   retrain:
     name: Ingest → Features → Train → Export
@@ -54,7 +58,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          BRANCH="retrain/$(date -u +%Y-%m-%d)"
+          BRANCH="retrain/$(date -u +%Y-%m-%d)-${{ github.run_id }}"
           git checkout -b "$BRANCH"
           git commit -m "chore: update ONNX artifacts ($(date -u +%Y-%m-%d))"
           git push origin "$BRANCH"
