@@ -16,11 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
 # Copy application source
-COPY data/ ./data/
-COPY features/ ./features/
-COPY models/ ./models/
-COPY serving/ ./serving/
-COPY dashboard/ ./dashboard/
+COPY pulsecast/ ./pulsecast/
 
 ENV PYTHONUNBUFFERED=1
 

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 # Import helpers
 # ---------------------------------------------------------------------------
-from data.ingest.gtfs_rt_backfill import (
+from pulsecast.data.ingest.gtfs_rt_backfill import (
     _date_range,
     _parse_args,
     _s3_key,
@@ -85,7 +85,7 @@ def test_s3_key_no_prefix():
 
 
 def test_s3_key_with_prefix(monkeypatch):
-    import data.ingest.gtfs_rt_backfill as mod
+    import pulsecast.data.ingest.gtfs_rt_backfill as mod
 
     monkeypatch.setattr(mod, "_PREFIX", "feeds/mta")
     key = mod._s3_key(date(2024, 3, 7), 9)
@@ -103,7 +103,7 @@ def test_s3_key_zero_padded():
 
 
 def test_fetch_archive_returns_feed_on_success():
-    from data.ingest.gtfs_rt_backfill import _fetch_archive
+    from pulsecast.data.ingest.gtfs_rt_backfill import _fetch_archive
 
     ts = int(datetime(2024, 3, 7, 14, 0, 0, tzinfo=UTC).timestamp())
     payload = _make_feed_bytes(ts, [("101", 30)])
@@ -119,7 +119,7 @@ def test_fetch_archive_returns_feed_on_success():
 def test_fetch_archive_returns_none_on_missing_key():
     from botocore.exceptions import ClientError
 
-    from data.ingest.gtfs_rt_backfill import _fetch_archive
+    from pulsecast.data.ingest.gtfs_rt_backfill import _fetch_archive
 
     s3_mock = MagicMock()
     error_response = {"Error": {"Code": "NoSuchKey", "Message": "Not found"}}
@@ -130,7 +130,7 @@ def test_fetch_archive_returns_none_on_missing_key():
 
 
 def test_fetch_archive_injects_timestamp_when_zero():
-    from data.ingest.gtfs_rt_backfill import _fetch_archive
+    from pulsecast.data.ingest.gtfs_rt_backfill import _fetch_archive
 
     # Build a feed with timestamp=0
     payload = _make_feed_bytes(0, [("101", 10)])
@@ -145,7 +145,7 @@ def test_fetch_archive_injects_timestamp_when_zero():
 
 
 def test_fetch_archive_returns_none_when_timestamp_unparseable():
-    from data.ingest.gtfs_rt_backfill import _fetch_archive
+    from pulsecast.data.ingest.gtfs_rt_backfill import _fetch_archive
 
     # Feed with timestamp=0 and a key that has no parseable date components.
     payload = _make_feed_bytes(0, [("101", 10)])
@@ -175,8 +175,8 @@ def test_backfill_dry_run_does_not_upsert():
     mock_session.client.return_value = s3_mock
 
     with (
-        patch("data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
-        patch("data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
+        patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
+        patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):
         total = backfill(date(2024, 1, 1), date(2024, 1, 1), dry_run=True)
 
@@ -197,8 +197,8 @@ def test_backfill_calls_upsert_when_not_dry_run():
     mock_session.client.return_value = s3_mock
 
     with (
-        patch("data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
-        patch("data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
+        patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
+        patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):
         total = backfill(date(2024, 1, 1), date(2024, 1, 1), dry_run=False)
 
@@ -218,8 +218,8 @@ def test_backfill_skips_missing_objects():
     mock_session.client.return_value = s3_mock
 
     with (
-        patch("data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
-        patch("data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
+        patch("pulsecast.data.ingest.gtfs_rt_backfill.boto3.Session", return_value=mock_session),
+        patch("pulsecast.data.ingest.gtfs_rt_backfill._upsert_rows") as mock_upsert,
     ):
         total = backfill(date(2024, 1, 1), date(2024, 1, 1), dry_run=False)
 

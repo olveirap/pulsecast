@@ -38,7 +38,7 @@ dependencies = [
   "scikit-learn>=1.4.0",
 
   # ONNX
-  "skl2onnx>=1.17.0",
+  "onnxmltools>=1.16.0",
   "onnxruntime>=1.17.0",
 
   # Serving
@@ -67,6 +67,9 @@ dev = [
   "ruff>=0.4.0",
   "mypy>=1.9.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pulsecast"]
 
 [tool.ruff]
 line-length = 100
