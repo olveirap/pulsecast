@@ -37,7 +37,12 @@ def _make_ort_module() -> MagicMock:
     def _fake_session(path: str) -> MagicMock:
         sess = MagicMock()
         sess.get_inputs.return_value = [MagicMock(name="X")]
-        sess.run.return_value = [np.array([[1.0]])]
+
+        def _fake_run(outputs, inputs):
+            x = list(inputs.values())[0]
+            return [np.ones((len(x), 1), dtype=np.float32)]
+
+        sess.run.side_effect = _fake_run
         return sess
 
     ort_module = MagicMock()

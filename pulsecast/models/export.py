@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
+if TYPE_CHECKING:
+    from pulsecast.models.lgbm import LGBMForecaster
 logger = logging.getLogger(__name__)
 
 _QUANTILE_NAMES = ("p10", "p50", "p90")
@@ -23,7 +26,7 @@ _PARITY_ATOL = 1e-3  # absolute tolerance for ONNX parity check
 
 
 def export_lgbm_to_onnx(
-    forecaster: "LGBMForecaster",  # noqa: F821
+    forecaster: LGBMForecaster,
     n_features: int,
     output_dir: str | Path = "models/onnx",
     n_parity_rows: int = 200,
