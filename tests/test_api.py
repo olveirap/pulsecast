@@ -198,3 +198,63 @@ def test_forecast_serves_cached_result(app_client):
     assert data["p10"] == [9.9]
     assert data["p50"] == [19.9]
     assert data["p90"] == [29.9]
+
+
+# ---------------------------------------------------------------------------
+# GET /calibration
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_returns_404_when_file_missing(app_client, tmp_path):
+    """GET /calibration must return 404 when calibration.json does not exist."""
+    client, main_mod, _ = app_client
+    missing = tmp_path / "no_such_file.json"
+
+    with patch.object(main_mod, "_CALIBRATION_PATH", missing):
+        resp = client.get("/calibration")
+
+    assert resp.status_code == 404
+    assert "run evaluation first" in resp.json()["detail"].lower()
+
+
+def test_calibration_returns_200_with_valid_file(app_client, tmp_path):
+    """GET /calibration must return 200 and the parsed JSON when the file exists."""
+    client, main_mod, _ = app_client
+    calib_file = tmp_path / "calibration.json"
+    calib_file.write_text(
+        json.dumps({"nominal": [0.1, 0.5, 0.9], "observed": [0.08, 0.47, 0.93]})
+    )
+
+    with patch.object(main_mod, "_CALIBRATION_PATH", calib_file):
+        resp = client.get("/calibration")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["nominal"] == pytest.approx([0.1, 0.5, 0.9])
+    assert data["observed"] == pytest.approx([0.08, 0.47, 0.93])
+
+
+def test_calibration_returns_500_on_malformed_file(app_client, tmp_path):
+    """GET /calibration must return 500 with a JSON-specific message on invalid JSON."""
+    client, main_mod, _ = app_client
+    bad_file = tmp_path / "calibration.json"
+    bad_file.write_text("not valid json {{{")
+
+    with patch.object(main_mod, "_CALIBRATION_PATH", bad_file):
+        resp = client.get("/calibration")
+
+    assert resp.status_code == 500
+    assert "malformed json" in resp.json()["detail"].lower()
+
+
+def test_calibration_returns_500_on_schema_mismatch(app_client, tmp_path):
+    """GET /calibration must return 500 with a schema message when JSON is valid but wrong shape."""
+    client, main_mod, _ = app_client
+    bad_file = tmp_path / "calibration.json"
+    bad_file.write_text(json.dumps({"wrong_key": [1, 2, 3]}))
+
+    with patch.object(main_mod, "_CALIBRATION_PATH", bad_file):
+        resp = client.get("/calibration")
+
+    assert resp.status_code == 500
+    assert "schema" in resp.json()["detail"].lower()
