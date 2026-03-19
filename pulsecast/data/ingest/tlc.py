@@ -20,10 +20,36 @@ logger = logging.getLogger(__name__)
 
 _DSN: str | None = os.getenv("TIMESCALE_DSN")
 
-# Zone-to-route mapping: TLC PULocationID → demand.route_id.
-# Currently empty, so every zone ID is used as its own route_id (identity fallback).
-# Populate this dict to remap specific zones to logical route identifiers.
-_ZONE_TO_ROUTE: dict[int, int] = {}
+_ZONE_ROUTES_PATH = Path(__file__).resolve().parents[3] / "data" / "zone_routes.csv"
+
+
+def _load_zone_to_route(path: Path = _ZONE_ROUTES_PATH) -> dict[int, int]:
+    """Load TLC zone->route mapping from CSV.
+
+    The CSV is expected to contain ``PULocationID`` and ``route_id`` columns.
+    """
+    if not path.exists():
+        logger.warning("Zone-route mapping file not found at %s; using identity mapping.", path)
+        return {}
+
+    mapping_df = pl.read_csv(path).select(["PULocationID", "route_id"])
+    mapping: dict[int, int] = {
+        int(r["PULocationID"]): int(r["route_id"])
+        for r in mapping_df.iter_rows(named=True)
+    }
+    logger.info("Loaded %d zone->route mappings from %s", len(mapping), path)
+    return mapping
+
+
+# Zone-to-route mapping: TLC PULocationID -> demand.route_id.
+_ZONE_TO_ROUTE: dict[int, int] = _load_zone_to_route()
+_ZONE_TO_ROUTE_DF = pl.DataFrame(
+    {
+        "PULocationID": list(_ZONE_TO_ROUTE.keys()),
+        "route_id": list(_ZONE_TO_ROUTE.values()),
+    },
+    schema={"PULocationID": pl.Int64, "route_id": pl.Int64},
+)
 
 # Base URL pattern used by the TLC open-data programme.
 _TLC_BASE = (
@@ -92,23 +118,30 @@ def load_and_filter(path: Path, color: str) -> pl.DataFrame:
 
 
 def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate to hourly pickup counts per TLC zone (PULocationID)."""
-    df = df.with_columns(
-        pl.col("pickup_datetime").dt.truncate("1h").alias("hour")
-    )
-    return (
-        df.group_by(["PULocationID", "hour"])
+    """Aggregate to hourly pickup counts per mapped route_id."""
+    hourly_by_zone = (
+        df.with_columns(pl.col("pickup_datetime").dt.truncate("1h").alias("hour"))
+        .group_by(["PULocationID", "hour"])
         .agg(pl.len().alias("pickup_count"))
-        .sort(["PULocationID", "hour"])
+    )
+
+    routed = hourly_by_zone.join(_ZONE_TO_ROUTE_DF, on="PULocationID", how="left")
+    return (
+        routed.with_columns(
+            pl.coalesce([pl.col("route_id"), pl.col("PULocationID")])
+            .cast(pl.Int64)
+            .alias("route_id")
+        )
+        .group_by(["route_id", "hour"])
+        .agg(pl.col("pickup_count").sum())
+        .sort(["route_id", "hour"])
     )
 
 
 def write_to_db(df: pl.DataFrame, dsn: str) -> int:
     """Upsert aggregated hourly counts into the *demand* hypertable.
 
-    Maps ``PULocationID`` to ``route_id`` via :data:`_ZONE_TO_ROUTE`, falling
-    back to the raw zone ID when no explicit mapping exists.  The ``hour``
-    column is made explicitly UTC-aware before insertion so that it aligns
+    The ``hour`` column is made explicitly UTC-aware before insertion so that it aligns
     correctly with the ``TIMESTAMPTZ`` column type.
 
     Returns the number of rows written.
@@ -118,7 +151,7 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
 
     params = [
         (
-            _ZONE_TO_ROUTE.get(int(r["PULocationID"]), int(r["PULocationID"])),
+            int(r["route_id"]),
             r["hour"].replace(tzinfo=UTC),
             int(r["pickup_count"]),
         )
@@ -173,14 +206,14 @@ def ingest(
 
     if not frames:
         return pl.DataFrame(
-            schema={"PULocationID": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
+            schema={"route_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
         )
 
     combined = (
         pl.concat(frames)
-        .group_by(["PULocationID", "hour"])
+        .group_by(["route_id", "hour"])
         .agg(pl.col("pickup_count").sum())
-        .sort(["PULocationID", "hour"])
+        .sort(["route_id", "hour"])
     )
 
     if dsn is not None:

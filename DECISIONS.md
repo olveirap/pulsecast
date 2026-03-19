@@ -90,3 +90,36 @@ key.
   disruptions at the boundary (e.g., 1.9 → 2.0 disruption threshold).
 - Ignore delay_index in cache key: incorrect — different congestion levels
   produce materially different forecasts.
+
+---
+
+## ADR-004 – TLC Zone to Route Corridor Mapping
+
+**Status:** Accepted
+
+**Context:**
+The `demand` table stores `route_id`, while NYC TLC trip records provide
+pickup geography as `PULocationID` (taxi zone IDs).  Without a stable mapping,
+ingestion writes one sparse time series per zone and does not align with the
+intended route-level modelling granularity.
+
+**Decision:**
+Add a versioned mapping file at `data/zone_routes.csv` that assigns each TLC
+`PULocationID` (1..263) to one of 20 logical borough-pair corridor route IDs.
+The mapping is loaded by `pulsecast.data.ingest.tlc` and applied during
+`aggregate_hourly()` so downstream storage and modelling consume route-level
+series directly.
+
+**Rationale:**
+- Keeps the mapping auditable and editable without code changes.
+- Collapses high-cardinality zone traffic into a compact set of route IDs
+  suitable for stable model training.
+- Applies mapping early in the pipeline (during hourly aggregation), reducing
+  duplicate downstream regrouping work.
+
+**Alternatives considered:**
+- Identity mapping (`route_id = PULocationID`): too sparse and does not match
+  route-level intent.
+- Hardcoded Python dict: difficult to review and maintain compared to CSV.
+- Applying mapping only at DB write time: late transformation leaks zone-level
+  structure into intermediate outputs and tests.
