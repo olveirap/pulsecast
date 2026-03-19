@@ -24,16 +24,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+import geopandas as gpd
+import pandas as pd
 import requests
-
-try:
-    import geopandas as gpd
-    import pandas as pd
-except ModuleNotFoundError as exc:
-    raise SystemExit(
-        "Missing geospatial dependencies. Install with `pip install .[geo]` "
-        "or `poetry install --extras geo` and rerun."
-    ) from exc
 
 DEFAULT_GTFS_STATIC_URL = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip"
 DEFAULT_TAXI_ZONES_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip"
