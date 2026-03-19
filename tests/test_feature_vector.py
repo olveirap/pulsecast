@@ -44,7 +44,7 @@ _FULL_CONG = np.ones(168, dtype=np.float32) * 0.5  # flat 0.5 delay_index
 
 
 def _make_psycopg2_mock(rows: list[tuple]) -> MagicMock:
-    """Return a psycopg2.connect mock that yields *rows* from fetchall()."""
+    """Return a connection mock that yields *rows* from fetchall()."""
     cursor_mock = MagicMock()
     cursor_mock.__enter__ = MagicMock(return_value=cursor_mock)
     cursor_mock.__exit__ = MagicMock(return_value=False)
@@ -57,6 +57,13 @@ def _make_psycopg2_mock(rows: list[tuple]) -> MagicMock:
     conn_mock.cursor.return_value = cursor_mock
 
     return conn_mock
+
+
+def _make_pool_mock(conn_mock: MagicMock) -> MagicMock:
+    """Return a _db_pool mock whose getconn() yields *conn_mock*."""
+    pool_mock = MagicMock()
+    pool_mock.getconn.return_value = conn_mock
+    return pool_mock
 
 
 def _make_static(
@@ -239,7 +246,7 @@ class TestFetchDemandHistory:
         # DB returns newest-first: rows are (167,), (166,), ..., (0,)
         rows = [(float(168 - i),) for i in range(1, 169)]  # 167, 166, ..., 0
         conn_mock = _make_psycopg2_mock(rows)
-        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main._db_pool", _make_pool_mock(conn_mock)):
             result = _fetch_demand_history(132, n_hours=168)
         assert result.shape == (168,)
         assert result.dtype == np.float32
@@ -248,14 +255,16 @@ class TestFetchDemandHistory:
         assert float(result[-1]) == pytest.approx(167.0)
 
     def test_returns_empty_on_db_error(self):
-        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=Exception("DB down")):
+        pool_mock = MagicMock()
+        pool_mock.getconn.side_effect = Exception("DB down")
+        with patch("pulsecast.serving.main._db_pool", pool_mock):
             result = _fetch_demand_history(1)
         assert isinstance(result, np.ndarray)
         assert len(result) == 0
 
     def test_returns_empty_when_no_rows(self):
         conn_mock = _make_psycopg2_mock([])
-        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main._db_pool", _make_pool_mock(conn_mock)):
             result = _fetch_demand_history(999)
         assert len(result) == 0
 
@@ -268,7 +277,7 @@ class TestFetchCongestionHistory:
     def test_returns_array_oldest_first(self):
         rows = [(float(i) * 0.1,) for i in range(168, 0, -1)]  # newest-first
         conn_mock = _make_psycopg2_mock(rows)
-        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main._db_pool", _make_pool_mock(conn_mock)):
             result = _fetch_congestion_history(132, n_hours=168)
         assert result.shape == (168,)
         assert result.dtype == np.float32
@@ -276,14 +285,16 @@ class TestFetchCongestionHistory:
         assert float(result[0]) <= float(result[-1])
 
     def test_returns_empty_on_db_error(self):
-        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=Exception("DB down")):
+        pool_mock = MagicMock()
+        pool_mock.getconn.side_effect = Exception("DB down")
+        with patch("pulsecast.serving.main._db_pool", pool_mock):
             result = _fetch_congestion_history(1)
         assert isinstance(result, np.ndarray)
         assert len(result) == 0
 
     def test_returns_empty_when_no_rows(self):
         conn_mock = _make_psycopg2_mock([])
-        with patch("pulsecast.serving.main.psycopg2.connect", return_value=conn_mock):
+        with patch("pulsecast.serving.main._db_pool", _make_pool_mock(conn_mock)):
             result = _fetch_congestion_history(999)
         assert len(result) == 0
 
@@ -307,12 +318,15 @@ class TestFeatureVectorWithMockedDB:
 
         call_count = 0
 
-        def _connect_side_effect(*args, **kwargs):
+        def _getconn_side_effect():
             nonlocal call_count
             call_count += 1
             return demand_conn if call_count == 1 else cong_conn
 
-        with patch("pulsecast.serving.main.psycopg2.connect", side_effect=_connect_side_effect):
+        pool_mock = MagicMock()
+        pool_mock.getconn.side_effect = _getconn_side_effect
+
+        with patch("pulsecast.serving.main._db_pool", pool_mock):
             d_hist = _fetch_demand_history(132)
             c_hist = _fetch_congestion_history(132)
 
