@@ -44,6 +44,12 @@ _CALIBRATION_PATH = Path(os.getenv("CALIBRATION_PATH", "data/results/calibration
 _DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "2"))
 _DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 
+# Validate both are positive and DB_POOL_MAX >= DB_POOL_MIN
+if _DB_POOL_MIN <= 0:
+    raise ValueError(f"DB_POOL_MIN must be positive, got {_DB_POOL_MIN}") 
+if _DB_POOL_MAX < _DB_POOL_MIN:
+    raise ValueError(f"DB_POOL_MAX must be >= DB_POOL_MIN, got {_DB_POOL_MAX} < {_DB_POOL_MIN}")
+
 # Canonical ordered feature names – must stay in sync with _build_feature_matrix.
 _FEATURE_NAMES: list[str] = [
     # ── Basic (3) ──────────────────────────────────────────────────────────
