@@ -30,6 +30,16 @@ def build_congestion_features(df: pl.DataFrame) -> pl.DataFrame:
     pl.DataFrame
         Original columns plus congestion feature columns.
     """
+    if "travel_time_var" not in df.columns:
+        if "delay_index" in df.columns:
+            df = df.with_columns(pl.col("delay_index").alias("travel_time_var"))
+        else:
+            raise ValueError("build_congestion_features requires travel_time_var or delay_index")
+
+    if "sample_count" not in df.columns:
+        # Keep output schema stable for legacy inputs without sampling metadata.
+        df = df.with_columns(pl.lit(0).cast(pl.Int32).alias("sample_count"))
+
     df = df.sort(["zone_id", "hour"])
 
     df = df.with_columns(

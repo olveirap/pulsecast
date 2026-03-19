@@ -299,9 +299,9 @@ def _fetch_congestion_history(zone_id: int, n_hours: int = 168) -> np.ndarray:
 def _build_static_features(
     route_id: int,
     travel_time_var: float,
-    sample_count: int,
     demand_history: np.ndarray,
     congestion_history: np.ndarray,
+    sample_count: int = 0,
 ) -> np.ndarray:
     """
     Build the feature slots that do not depend on *horizon_hours* or calendar.
@@ -423,7 +423,11 @@ def _build_feature_matrix(
         congestion_history = np.empty(0, dtype=np.float32)
 
     static = _build_static_features(
-        route_id, travel_time_var, sample_count, demand_history, congestion_history
+        route_id,
+        travel_time_var,
+        demand_history,
+        congestion_history,
+        sample_count=sample_count,
     )
     rows = [_build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)]
     return np.array(rows, dtype=np.float32)

@@ -44,6 +44,7 @@ def load_from_timescaledb() -> pl.DataFrame:
         d.route_id, 
         d.hour, 
         d.volume, 
+        COALESCE(c.travel_time_var, 0.0) as delay_index,
         COALESCE(c.travel_time_var, 0.0) as travel_time_var,
         COALESCE(c.sample_count, 0) as sample_count
     FROM demand d
