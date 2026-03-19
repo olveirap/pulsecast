@@ -30,6 +30,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import boto3
 from botocore.exceptions import ClientError
+from dotenv import load_dotenv
 from google.protobuf.message import DecodeError
 from google.transit import gtfs_realtime_pb2
 
@@ -37,6 +38,7 @@ from pulsecast.data.ingest.gtfs_rt import _compute_delay_index, _upsert_rows
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 _BUCKET = os.getenv("BACKFILL_BUCKET", "mta-gtfs-rt-archives")
 _PREFIX = os.getenv("BACKFILL_PREFIX", "")
 _REGION = os.getenv("AWS_REGION", "us-east-1")

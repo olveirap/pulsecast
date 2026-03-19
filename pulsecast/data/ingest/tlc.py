@@ -14,10 +14,12 @@ from pathlib import Path
 import polars as pl
 import psycopg2
 import requests
+from dotenv import load_dotenv
 from psycopg2.extras import execute_values
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 _DSN: str | None = os.getenv("TIMESCALE_DSN")
 
 # Base URL pattern used by the TLC open-data programme.

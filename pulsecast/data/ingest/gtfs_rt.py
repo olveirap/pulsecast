@@ -15,10 +15,12 @@ from pathlib import Path
 import psycopg2
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
+from dotenv import load_dotenv
 from google.transit import gtfs_realtime_pb2
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
 _MTA_FEED_URL = os.getenv("MTA_FEED_URL", "https://api.mta.info/GTFS")
 _MTA_API_KEY = os.getenv("MTA_API_KEY", "")
 
