@@ -336,4 +336,3 @@ class TestFeatureVectorWithMockedDB:
         assert vec.dtype == np.float32
         # Feature vector must not be all zeros
         assert not np.all(vec == 0.0)
-
