@@ -15,14 +15,15 @@ import json
 import logging
 import os
 import time
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from psycopg2 import pool as pg_pool
 from pydantic import ValidationError
 
 from pulsecast.features.calendar import scalar_calendar_features
@@ -40,6 +41,14 @@ _DB_DSN = os.getenv(
     "postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast",
 )
 _CALIBRATION_PATH = Path(os.getenv("CALIBRATION_PATH", "data/results/calibration.json"))
+_DB_POOL_MIN = int(os.getenv("DB_POOL_MIN", "2"))
+_DB_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
+
+# Validate both are positive and DB_POOL_MAX >= DB_POOL_MIN
+if _DB_POOL_MIN <= 0:
+    raise ValueError(f"DB_POOL_MIN must be positive, got {_DB_POOL_MIN}") 
+if _DB_POOL_MAX < _DB_POOL_MIN:
+    raise ValueError(f"DB_POOL_MAX must be >= DB_POOL_MIN, got {_DB_POOL_MAX} < {_DB_POOL_MIN}")
 
 # Canonical ordered feature names – must stay in sync with _build_feature_matrix.
 _FEATURE_NAMES: list[str] = [
@@ -111,7 +120,29 @@ _CALENDAR_END: int = 16    # one past the last calendar feature index (13 featur
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Pulsecast", version="0.1.0")
+
+_db_pool: pg_pool.ThreadedConnectionPool | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    global _db_pool
+    _db_pool = pg_pool.ThreadedConnectionPool(
+        minconn=_DB_POOL_MIN,
+        maxconn=_DB_POOL_MAX,
+        dsn=_DB_DSN,
+    )
+    logger.info("DB pool created (min=%d, max=%d)", _db_pool.minconn, _db_pool.maxconn)
+    try:
+        yield
+    finally:
+        if _db_pool is not None:
+            _db_pool.closeall()
+        _db_pool = None
+        logger.info("DB pool closed")
+
+
+app = FastAPI(title="Pulsecast", version="0.1.0", lifespan=lifespan)
 
 _cache = ForecastCache()
 
@@ -132,33 +163,44 @@ except Exception:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
+@contextmanager
+def _get_conn():
+    """Yield a psycopg2 connection borrowed from the pool, returning it on exit."""
+    if _db_pool is None:
+        raise RuntimeError("DB pool not initialized")
+    conn = _db_pool.getconn()
+    try:
+        yield conn
+    finally:
+        _db_pool.putconn(conn)
+
+
 def _fetch_delay_index(route_id: int) -> float:
     """
     Retrieve the latest delay_index for *route_id* from TimescaleDB.
     """
-    conn = None
+    if _db_pool is None:
+        return 0.0
     try:
-        conn = psycopg2.connect(_DB_DSN)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT delay_index
-                    FROM delay_index
-                    WHERE zone_id = %s
-                    ORDER BY hour DESC
-                    LIMIT 1
-                    """,
-                    (route_id,),
-                )
-                row = cur.fetchone()
+        with _get_conn() as conn:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT delay_index
+                        FROM delay_index
+                        WHERE zone_id = %s
+                        ORDER BY hour DESC
+                        LIMIT 1
+                        """,
+                        (route_id,),
+                    )
+                    row = cur.fetchone()
         if row:
             return float(row[0])
     except Exception:
         logger.exception("Failed to fetch delay_index from TimescaleDB")
-    finally:
-        if conn is not None:
-            conn.close()
     return 0.0
 
 def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
@@ -169,30 +211,28 @@ def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     Returns a float32 array sorted oldest-first (index 0 = oldest hour,
     index -1 = most recent hour).  Returns an empty array on error.
     """
-    conn = None
+    if _db_pool is None:
+        return np.empty(0, dtype=np.float32)
     try:
-        conn = psycopg2.connect(_DB_DSN)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT volume
-                    FROM demand
-                    WHERE route_id = %s
-                    ORDER BY hour DESC
-                    LIMIT %s
-                    """,
-                    (route_id, n_hours),
-                )
-                rows = cur.fetchall()
+        with _get_conn() as conn:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT volume
+                        FROM demand
+                        WHERE route_id = %s
+                        ORDER BY hour DESC
+                        LIMIT %s
+                        """,
+                        (route_id, n_hours),
+                    )
+                    rows = cur.fetchall()
         if rows:
             # rows are newest-first; reverse to oldest-first
             return np.array([float(r[0]) for r in reversed(rows)], dtype=np.float32)
     except Exception:
         logger.exception("Failed to fetch demand history from TimescaleDB")
-    finally:
-        if conn is not None:
-            conn.close()
     return np.empty(0, dtype=np.float32)
 
 def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
@@ -203,30 +243,28 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
     Returns a float32 array sorted oldest-first (index 0 = oldest hour,
     index -1 = most recent hour).  Returns an empty array on error.
     """
-    conn = None
+    if _db_pool is None:
+        return np.empty(0, dtype=np.float32)
     try:
-        conn = psycopg2.connect(_DB_DSN)
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT delay_index
-                    FROM delay_index
-                    WHERE zone_id = %s
-                    ORDER BY hour DESC
-                    LIMIT %s
-                    """,
-                    (route_id, n_hours),
-                )
-                rows = cur.fetchall()
+        with _get_conn() as conn:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT delay_index
+                        FROM delay_index
+                        WHERE zone_id = %s
+                        ORDER BY hour DESC
+                        LIMIT %s
+                        """,
+                        (route_id, n_hours),
+                    )
+                    rows = cur.fetchall()
         if rows:
             # rows are newest-first; reverse to oldest-first
             return np.array([float(r[0]) for r in reversed(rows)], dtype=np.float32)
     except Exception:
         logger.exception("Failed to fetch congestion history from TimescaleDB")
-    finally:
-        if conn is not None:
-            conn.close()
     return np.empty(0, dtype=np.float32)
 
 def _build_static_features(
@@ -385,8 +423,22 @@ def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, Any]:
+    result: dict[str, Any] = {"status": "ok"}
+    if _db_pool is not None:
+        try:
+            # psycopg2 does not expose a public API for live pool stats; _pool
+            # (idle connections) and _used (borrowed connections) are private
+            # but stable across all 2.x releases.
+            result["db_pool"] = {
+                "min": _db_pool.minconn,
+                "max": _db_pool.maxconn,
+                "available": len(_db_pool._pool),
+                "in_use": len(_db_pool._used),
+            }
+        except Exception:
+            result["db_pool"] = {"error": "stats unavailable"}
+    return result
 
 
 @app.get("/calibration", response_model=CalibrationResponse)

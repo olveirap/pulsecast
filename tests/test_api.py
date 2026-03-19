@@ -50,6 +50,35 @@ def _make_ort_module() -> MagicMock:
     return ort_module
 
 
+def _make_pool_mock() -> tuple[MagicMock, MagicMock, MagicMock]:
+    """Return (pool_class_mock, pool_instance_mock, cursor_mock).
+
+    The pool_class_mock is used to patch ``psycopg2.pool.ThreadedConnectionPool``.
+    ``pool_instance_mock.getconn()`` returns a connection whose cursor yields
+    ``cursor_mock``.
+    """
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = (0.5,)
+    mock_cursor.fetchall.return_value = []
+
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = lambda s: s
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    mock_pool = MagicMock()
+    mock_pool.minconn = 2
+    mock_pool.maxconn = 10
+    # Mirror the private attrs that the /health endpoint reads for pool stats.
+    mock_pool._pool = []
+    mock_pool._used = {}
+    mock_pool.getconn.return_value = mock_conn
+
+    mock_pool_class = MagicMock(return_value=mock_pool)
+    return mock_pool_class, mock_pool, mock_cursor
+
+
 # ---------------------------------------------------------------------------
 # App fixture
 # ---------------------------------------------------------------------------
@@ -61,29 +90,20 @@ def app_client():
     Yield (TestClient, pulsecast.serving.main module, redis_client) with all external I/O mocked:
       - onnxruntime   → MagicMock InferenceSession returning fixed predictions
       - redis         → MagicMock client (cache always misses by default)
-      - psycopg2      → MagicMock connection returning delay_index=0.5
+      - psycopg2.pool.ThreadedConnectionPool → MagicMock pool returning delay_index=0.5
     """
     redis_module, redis_client = _make_redis_module()
     ort_module = _make_ort_module()
+    mock_pool_class, _mock_pool, _mock_cursor = _make_pool_mock()
 
     # Remove any previously cached serving modules.
     for mod_name in list(sys.modules):
         if mod_name.startswith("serving"):
             del sys.modules[mod_name]
 
-    mock_pg = MagicMock()
-    mock_cursor = MagicMock()
-    mock_cursor.fetchone.return_value = (0.5,)
-    mock_conn = MagicMock()
-    mock_conn.__enter__ = lambda s: s
-    mock_conn.__exit__ = MagicMock(return_value=False)
-    mock_conn.cursor.return_value.__enter__ = lambda s: mock_cursor
-    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
-    mock_pg.return_value = mock_conn
-
     with (
         patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
-        patch("psycopg2.connect", mock_pg),
+        patch("psycopg2.pool.ThreadedConnectionPool", mock_pool_class),
     ):
         import pulsecast.serving.main as main_mod
 
@@ -102,7 +122,21 @@ def test_health_returns_ok(app_client):
     client, _, _rc = app_client
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    assert resp.json()["status"] == "ok"
+
+
+def test_health_includes_pool_stats(app_client):
+    """Health response must include db_pool stats when the pool is active."""
+    client, _, _rc = app_client
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "db_pool" in data
+    pool = data["db_pool"]
+    assert "min" in pool
+    assert "max" in pool
+    assert "available" in pool
+    assert "in_use" in pool
 
 
 # ---------------------------------------------------------------------------
