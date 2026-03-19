@@ -162,6 +162,31 @@ python -m data.ingest.gtfs_rt_backfill \
     --dry-run
 ```
 
+### Build stop-to-zone mapping (required for GTFS-RT coverage)
+
+`delay_index` aggregation depends on a complete GTFS stop-to-TLC zone mapping
+stored at `pulsecast/data/stop_to_zone.csv`.
+
+Install geospatial extras first in a clean environment:
+
+```bash
+make install-geo
+# or:
+pip install ".[geo]"
+# or: poetry install --extras geo
+```
+
+Regenerate it with:
+
+```bash
+make build-stop-zone-map
+# or: python scripts/build_stop_zone_map.py
+```
+
+The script downloads MTA GTFS static `stops.txt` and TLC taxi zone polygons,
+spatially joins stop coordinates to zone polygons, and writes the CSV used at
+runtime by `pulsecast.data.ingest.gtfs_rt`.
+
 ### 5. Train models
 
 ```bash
