@@ -17,6 +17,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import polars as pl
 
+from scripts.pipeline_config import LGBM_FEATURES
+
 # ---------------------------------------------------------------------------
 # Mocks for heavy imports
 # ---------------------------------------------------------------------------
@@ -83,9 +85,8 @@ def test_run_features(mock_read_db, mock_connect):
             assert out_path.exists()
             
             df_out = pl.read_parquet(out_path)
-            assert "lag_1h" in df_out.columns
-            assert "hour_of_day" in df_out.columns
-            assert "disruption_flag" in df_out.columns
+            missing = sorted(set(LGBM_FEATURES) - set(df_out.columns))
+            assert not missing, f"run_features output missing required train columns: {missing}"
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +151,8 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             "delay_index_rolling3h": rng.uniform(0, 1, n_rows),
             "disruption_flag": [0] * n_rows
         })
+        missing = sorted(set(LGBM_FEATURES) - set(df.columns))
+        assert not missing, f"Synthetic training data missing required columns: {missing}"
         df.write_parquet(feat_path)
         print(f"Dummy features written to {feat_path}.")
         
@@ -167,6 +170,58 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             assert (models_dir / "baseline.pkl").exists()
             assert (models_dir / "lgbm_forecaster.pkl").exists()
             assert mock_start_run.called
+
+
+def test_prepare_data_drops_split_boundary_hour():
+    """prepare_data should exclude all rows at the cutoff hour from both splits."""
+    from scripts.run_train import prepare_data
+
+    n_hours = 10
+    route_ids = [101, 202]
+    start_dt = datetime(2024, 1, 1)
+
+    hours: list[datetime] = []
+    routes: list[int] = []
+    for h in range(n_hours):
+        for rid in route_ids:
+            hours.append(start_dt + timedelta(hours=h))
+            routes.append(rid)
+
+    n_rows = len(hours)
+    df = pl.DataFrame({
+        "route_id": routes,
+        "hour": hours,
+        "volume": [10.0] * n_rows,
+        "delay_index": [0.1] * n_rows,
+        "hour_of_day": [h.hour for h in hours],
+        "dow": [1] * n_rows,
+        "month": [1] * n_rows,
+        "week_of_year": [1] * n_rows,
+        "is_weekend": [0] * n_rows,
+        "days_to_next_us_holiday": [5] * n_rows,
+        "nyc_event_flag": [0] * n_rows,
+        "lag_1h": [1.0] * n_rows,
+        "lag_2h": [1.0] * n_rows,
+        "lag_3h": [1.0] * n_rows,
+        "lag_24h": [1.0] * n_rows,
+        "lag_168h": [1.0] * n_rows,
+        "rolling_mean_3h": [1.0] * n_rows,
+        "rolling_mean_24h": [1.0] * n_rows,
+        "rolling_mean_168h": [1.0] * n_rows,
+        "ewm_trend_24h": [1.0] * n_rows,
+        "yoy_ratio": [1.0] * n_rows,
+        "delay_index_lag1": [0.1] * n_rows,
+        "delay_index_rolling3h": [0.1] * n_rows,
+        "disruption_flag": [0] * n_rows,
+    })
+
+    _, _, _, _, train_df, val_df = prepare_data(df)
+
+    cutoff_ts = start_dt + timedelta(hours=8)
+    dropped_expected = len(route_ids)
+    assert train_df.filter(pl.col("hour") == cutoff_ts).is_empty()
+    assert val_df.filter(pl.col("hour") == cutoff_ts).is_empty()
+    assert train_df.height + val_df.height == df.height - dropped_expected
 
 
 # ---------------------------------------------------------------------------

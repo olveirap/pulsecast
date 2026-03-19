@@ -69,11 +69,11 @@ def main() -> None:
     except Exception as e:
         logger.error("Failed to load data from TimescaleDB: %s", e)
         logger.warning("Pipeline cannot proceed without source data.")
-        return
+        raise SystemExit(1) from e
 
     if df.is_empty():
         logger.warning("No data found in database. Run 'make ingest' first.")
-        return
+        raise SystemExit(1)
 
     # 2. Run feature engineering
     logger.info("Building demand features...")

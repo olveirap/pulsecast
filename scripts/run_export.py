@@ -12,16 +12,10 @@ import pickle
 from pathlib import Path
 
 from pulsecast.models.export import export_lgbm_to_onnx
+from scripts.pipeline_config import LGBM_FEATURES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-# Number of features must match _LGBM_FEATURES in run_train.py
-_N_FEATURES = 22
-
 
 def main() -> None:
     models_dir = Path(os.getenv("MODELS_DIR", "models"))
@@ -30,7 +24,7 @@ def main() -> None:
 
     if not pickle_path.exists():
         logger.error("Fitted LightGBM pickle not found at %s. Run 'make train' first.", pickle_path)
-        return
+        raise SystemExit(1)
 
     logger.info("Loading fitted LGBMForecaster from %s", pickle_path)
     with open(pickle_path, "rb") as f:
@@ -39,7 +33,7 @@ def main() -> None:
     logger.info("Exporting to ONNX in %s", onnx_dir)
     saved_paths = export_lgbm_to_onnx(
         forecaster=forecaster,
-        n_features=_N_FEATURES,
+        n_features=len(LGBM_FEATURES),
         output_dir=onnx_dir
     )
     

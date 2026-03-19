@@ -103,7 +103,9 @@ def build_calendar_features(df: pl.DataFrame) -> pl.DataFrame:
         [
             pl.col("hour").dt.weekday().alias("dow"),
             pl.col("hour").dt.hour().alias("hour_of_day"),
+            pl.col("hour").dt.month().alias("month"),
             pl.col("hour").dt.week().alias("week_of_year"),
+            (pl.col("hour").dt.weekday().is_in([6, 7])).cast(pl.Int8).alias("is_weekend"),
         ]
     )
 

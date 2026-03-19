@@ -19,22 +19,10 @@ import polars as pl
 from pulsecast.models.baseline import BaselineForecaster
 from pulsecast.models.lgbm import LGBMForecaster
 from pulsecast.models.tft import TFTForecaster
+from scripts.pipeline_config import LGBM_FEATURES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-_LGBM_FEATURES = [
-    "route_id", "delay_index", "hour_of_day", "dow", "month", "week_of_year",
-    "is_weekend", "days_to_next_us_holiday", "nyc_event_flag",
-    "lag_1h", "lag_2h", "lag_3h", "lag_24h", "lag_168h",
-    "rolling_mean_3h", "rolling_mean_24h", "rolling_mean_168h",
-    "ewm_trend_24h", "yoy_ratio",
-    "delay_index_lag1", "delay_index_rolling3h", "disruption_flag"
-]
-
 
 def prepare_data(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, pl.DataFrame, pl.DataFrame]:
     """Split features into training/validation and target."""
@@ -42,19 +30,37 @@ def prepare_data(df: pl.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     # Drop rows with NaNs from lags/rolling windows
     df = df.drop_nulls()
     
+    missing_features = sorted(set(LGBM_FEATURES) - set(df.columns))
+    if missing_features:
+        raise ValueError(f"Missing required feature columns: {missing_features}")
+
     # Sort for time-based split
     df = df.sort("hour")
-    
-    # Simple split: last 20% for validation
-    n = len(df)
-    train_size = int(n * 0.8)
-    
-    train_df = df.head(train_size)
-    val_df = df.tail(n - train_size)
-    
-    X_train = train_df.select(_LGBM_FEATURES).to_numpy()
+
+    # Split on an hour cutoff so rows from the same timestamp stay together.
+    unique_hours = df.select("hour").unique().sort("hour")
+    if unique_hours.height < 2:
+        raise ValueError("Need at least two distinct timestamps for train/validation split")
+    cutoff_index = max(1, int(unique_hours.height * 0.8))
+    if cutoff_index >= unique_hours.height:
+        cutoff_index = unique_hours.height - 1
+    cutoff_ts = unique_hours.row(cutoff_index)[0]
+
+    train_df = df.filter(pl.col("hour") < cutoff_ts)
+    val_df = df.filter(pl.col("hour") > cutoff_ts)
+    dropped_at_cutoff = df.filter(pl.col("hour") == cutoff_ts).height
+    if dropped_at_cutoff:
+        logger.info(
+            "Dropping %d rows at split boundary hour (%s) to prevent leakage.",
+            dropped_at_cutoff,
+            cutoff_ts,
+        )
+    if train_df.is_empty() or val_df.is_empty():
+        raise ValueError("Time-based split produced an empty train or validation set")
+
+    X_train = train_df.select(LGBM_FEATURES).to_numpy()
     y_train = train_df.select("volume").to_numpy().flatten()
-    X_val = val_df.select(_LGBM_FEATURES).to_numpy()
+    X_val = val_df.select(LGBM_FEATURES).to_numpy()
     y_val = val_df.select("volume").to_numpy().flatten()
     
     logger.info("Data prepared: %d train rows, %d val rows.", len(train_df), len(val_df))
@@ -82,8 +88,9 @@ def train_lgbm(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_va
         forecaster.fit(X_train, y_train, eval_set=(X_val, y_val))
         
         logger.info("Running LightGBM cross-validation...")
-        # Log CV results
-        cv_results = forecaster.cross_validate(X_train, y_train, n_splits=3)
+        # Use a dedicated instance so CV retraining does not overwrite persisted models.
+        cv_forecaster = LGBMForecaster()
+        cv_results = cv_forecaster.cross_validate(X_train, y_train, n_splits=3)
         for fold, res in enumerate(cv_results):
             for q_name, loss in res.items():
                 mlflow.log_metric(f"fold{fold}_{q_name}_pinball", loss)
@@ -134,7 +141,7 @@ def main() -> None:
 
     if not feat_path.exists():
         logger.error("Features not found at %s. Run 'make features' first.", feat_path)
-        return
+        raise SystemExit(1)
 
     logger.info("Loading features from %s", feat_path)
     df = pl.read_parquet(feat_path)
