@@ -90,3 +90,6 @@ key.
   disruptions at the boundary (e.g., 1.9 → 2.0 disruption threshold).
 - Ignore delay_index in cache key: incorrect — different congestion levels
   produce materially different forecasts.
+
+---
+
