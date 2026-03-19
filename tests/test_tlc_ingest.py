@@ -31,12 +31,12 @@ def _make_hourly_df(rows: list[tuple[int, datetime, int]]) -> pl.DataFrame:
     """Build a small aggregated DataFrame with the schema produced by aggregate_hourly."""
     return pl.DataFrame(
         {
-            "route_id": [r[0] for r in rows],
+            "zone_id": [r[0] for r in rows],
             "hour": [r[1] for r in rows],
             "pickup_count": [r[2] for r in rows],
         },
         schema={
-            "route_id": pl.Int64,
+            "zone_id": pl.Int64,
             "hour": pl.Datetime("us"),
             "pickup_count": pl.UInt32,
         },
@@ -60,18 +60,7 @@ def mock_db_conn():
 # ---------------------------------------------------------------------------
 
 
-def test_aggregate_hourly_counts_per_zone_and_hour(monkeypatch):
-    from pulsecast.data.ingest import tlc
-
-    monkeypatch.setattr(
-        tlc,
-        "_ZONE_TO_ROUTE_DF",
-        pl.DataFrame(
-            {"PULocationID": [1, 2], "route_id": [101, 102]},
-            schema={"PULocationID": pl.Int64, "route_id": pl.Int64},
-        ),
-    )
-
+def test_aggregate_hourly_counts_per_zone_and_hour():
     raw = pl.DataFrame(
         {
             "pickup_datetime": [
@@ -85,11 +74,10 @@ def test_aggregate_hourly_counts_per_zone_and_hour(monkeypatch):
         schema={"pickup_datetime": pl.Datetime("us"), "PULocationID": pl.Int64},
     )
     result = aggregate_hourly(raw)
-    # Route 101 (mapped from zone 1), hour 14 -> 2 trips.
+    # Zone 1, hour 14 -> 2 trips; zone 1, hour 15 -> 1 trip; zone 2, hour 14 -> 1 trip.
     assert result.shape[0] == 3
     row = result.filter(
-        (pl.col("route_id") == 101)
-        & (pl.col("hour") == datetime(2024, 3, 7, 14, 0, 0))
+        (pl.col("zone_id") == 1) & (pl.col("hour") == datetime(2024, 3, 7, 14, 0, 0))
     )
     assert row["pickup_count"].item() == 2
 
@@ -103,33 +91,7 @@ def test_aggregate_hourly_output_columns():
         schema={"pickup_datetime": pl.Datetime("us"), "PULocationID": pl.Int64},
     )
     result = aggregate_hourly(raw)
-    assert set(result.columns) == {"route_id", "hour", "pickup_count"}
-
-
-def test_aggregate_hourly_applies_zone_to_route_mapping(monkeypatch):
-    raw = pl.DataFrame(
-        {
-            "pickup_datetime": [
-                datetime(2024, 3, 7, 14, 5),
-                datetime(2024, 3, 7, 14, 25),
-            ],
-            "PULocationID": [1, 1],
-        },
-        schema={"pickup_datetime": pl.Datetime("us"), "PULocationID": pl.Int64},
-    )
-
-    from pulsecast.data.ingest import tlc
-
-    monkeypatch.setattr(
-        tlc,
-        "_ZONE_TO_ROUTE_DF",
-        pl.DataFrame(
-            {"PULocationID": [1], "route_id": [99]},
-            schema={"PULocationID": pl.Int64, "route_id": pl.Int64},
-        ),
-    )
-    result = aggregate_hourly(raw)
-    assert result["route_id"].item() == 99
+    assert set(result.columns) == {"zone_id", "hour", "pickup_count"}
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +101,7 @@ def test_aggregate_hourly_applies_zone_to_route_mapping(monkeypatch):
 
 def test_write_to_db_returns_zero_for_empty_df():
     empty = pl.DataFrame(
-        schema={"route_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
+        schema={"zone_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
     )
     result = write_to_db(empty, "postgresql://fake/fake")
     assert result == 0
@@ -161,8 +123,8 @@ def test_write_to_db_upserts_rows(mock_db_conn):
     assert len(params_list) == 2
 
 
-def test_write_to_db_uses_route_id_column(mock_db_conn):
-    """write_to_db should insert the route_id produced by aggregate_hourly."""
+def test_write_to_db_uses_zone_id_as_route_id(mock_db_conn):
+    """write_to_db should insert zone_id into demand.route_id."""
     df = _make_hourly_df([(999, _HOUR, 3)])
 
     with (
@@ -176,8 +138,8 @@ def test_write_to_db_uses_route_id_column(mock_db_conn):
     assert params_list[0][0] == 999
 
 
-def test_write_to_db_preserves_route_id(mock_db_conn):
-    """write_to_db should preserve route_id values provided by aggregation."""
+def test_write_to_db_preserves_zone_id(mock_db_conn):
+    """write_to_db should preserve zone_id values provided by aggregation."""
     df = _make_hourly_df([(42, _HOUR, 7)])
 
     with (
@@ -266,7 +228,7 @@ def test_ingest_returns_nonempty_dataframe(tmp_path: Path):
         result = ingest(dest_dir=tmp_path, months=1, colors=("yellow",), dsn=None)
 
     assert result.shape[0] > 0
-    assert set(result.columns) == {"route_id", "hour", "pickup_count"}
+    assert set(result.columns) == {"zone_id", "hour", "pickup_count"}
 
 
 def test_ingest_calls_write_to_db_when_dsn_provided(tmp_path: Path):
