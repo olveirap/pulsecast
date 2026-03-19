@@ -23,8 +23,8 @@ from typing import Any
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 from psycopg2 import pool as pg_pool
+from pydantic import ValidationError
 
 from pulsecast.features.calendar import scalar_calendar_features
 from pulsecast.serving.cache import ForecastCache
