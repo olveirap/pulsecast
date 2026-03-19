@@ -5,7 +5,7 @@ Pulsecast is a high-performance, probabilistic shipment demand forecasting syste
 ## Project Overview
 
 ### Core Technologies
-- **Languages:** Python 3.11+
+- **Languages:** Python 3.12+
 - **Data/Storage:** TimescaleDB (PostgreSQL), Redis (Caching), Polars/Pandas, Feast (Feature Store)
 - **ML/Models:** LightGBM (Quantile Regression), Temporal Fusion Transformer (PyTorch Forecasting), ONNX Runtime (Inference)
 - **API/Serving:** FastAPI, Uvicorn, Pydantic v2
@@ -27,7 +27,7 @@ Pulsecast is a high-performance, probabilistic shipment demand forecasting syste
 The project relies on a `Makefile` for most operations.
 
 ### Environment Setup
-1.  **Dependencies:** Ensure Python 3.11 and `poetry` are installed.
+1.  **Dependencies:** Ensure Python 3.12 and `poetry` are installed.
     ```bash
     make install
     ```
