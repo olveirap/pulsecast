@@ -19,17 +19,37 @@ Optional arguments:
 from __future__ import annotations
 
 import argparse
+import os
 import tempfile
 import zipfile
 from pathlib import Path
 
-import geopandas as gpd
-import pandas as pd
 import requests
+
+try:
+    import geopandas as gpd
+    import pandas as pd
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "Missing geospatial dependencies. Install with `pip install .[geo]` "
+        "or `poetry install --extras geo` and rerun."
+    ) from exc
 
 DEFAULT_GTFS_STATIC_URL = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip"
 DEFAULT_TAXI_ZONES_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip"
 DEFAULT_OUTPUT = Path("pulsecast/data/stop_to_zone.csv")
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
+    """Extract zip members after validating that paths stay inside destination."""
+    destination = destination.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+
+    for member in zf.infolist():
+        target_path = (destination / member.filename).resolve()
+        if os.path.commonpath([str(destination), str(target_path)]) != str(destination):
+            raise ValueError(f"Unsafe zip member path detected: {member.filename}")
+    zf.extractall(destination)
 
 
 def _download(url: str, destination: Path) -> None:
@@ -58,7 +78,7 @@ def _load_taxi_zones(taxi_zip_path: Path) -> gpd.GeoDataFrame:
             raise ValueError("Taxi zones zip has no .shp file")
         shp_name = shapefiles[0]
         extract_dir = taxi_zip_path.parent / "taxi_zones"
-        zf.extractall(extract_dir)
+        _safe_extract_zip(zf, extract_dir)
     zones = gpd.read_file(extract_dir / shp_name)
     if "LocationID" not in zones.columns:
         raise ValueError("Taxi zones dataset is missing required LocationID column")

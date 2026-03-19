@@ -30,15 +30,37 @@ _DB_DSN = os.getenv(
 _DEFAULT_STOP_ZONE_MAP = Path(__file__).resolve().parents[1] / "stop_to_zone.csv"
 
 
+def _resolve_stop_zone_map_path(path: str | Path | None = None) -> Path:
+    """Resolve the stop-zone CSV path from explicit arg, env var, or default."""
+    if isinstance(path, Path):
+        return path
+    if isinstance(path, str):
+        cleaned = path.strip()
+        if cleaned:
+            return Path(cleaned)
+
+    env_path = (os.getenv("STOP_ZONE_MAP_PATH") or "").strip()
+    if env_path:
+        return Path(env_path)
+
+    return _DEFAULT_STOP_ZONE_MAP
+
+
 def _load_stop_to_zone(path: str | Path | None = None) -> dict[str, int]:
     """Load stop_id -> TLC zone mapping from CSV.
 
     Expected CSV columns: stop_id,zone_id.
     """
-    csv_path = Path(path or os.getenv("STOP_ZONE_MAP_PATH") or _DEFAULT_STOP_ZONE_MAP)
+    csv_path = _resolve_stop_zone_map_path(path)
     if not csv_path.exists():
         logger.warning(
             "Stop-to-zone CSV not found at %s. delay_index rows will be empty until map is generated.",
+            csv_path,
+        )
+        return {}
+    if csv_path.is_dir():
+        logger.warning(
+            "Stop-to-zone CSV path points to a directory (%s). delay_index rows will be empty.",
             csv_path,
         )
         return {}
