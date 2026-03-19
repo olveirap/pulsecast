@@ -27,7 +27,7 @@ Pulsecast is a high-performance, probabilistic shipment demand forecasting syste
 The project relies on a `Makefile` for most operations.
 
 ### Environment Setup
-1.  **Dependencies:** Ensure Python 3.11 and `uv` are installed.
+1.  **Dependencies:** Ensure Python 3.11 and `poetry` are installed.
     ```bash
     make install
     ```
