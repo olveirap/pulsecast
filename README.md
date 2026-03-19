@@ -167,15 +167,6 @@ python -m data.ingest.gtfs_rt_backfill \
 `delay_index` aggregation depends on a complete GTFS stop-to-TLC zone mapping
 stored at `pulsecast/data/stop_to_zone.csv`.
 
-Install geospatial extras first in a clean environment:
-
-```bash
-make install-geo
-# or:
-pip install ".[geo]"
-# or: poetry install --extras geo
-```
-
 Regenerate it with:
 
 ```bash
