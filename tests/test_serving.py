@@ -36,14 +36,18 @@ def _make_mock_session(n_rows: int) -> MagicMock:
 def test_build_feature_matrix_shape():
     import pulsecast.serving.main as m
 
-    mat = m._build_feature_matrix(route_id=10, horizon_hours=24, delay_index=0.5)
+    mat = m._build_feature_matrix(
+        route_id=10, horizon_hours=24, travel_time_var=0.5, sample_count=15
+    )
     assert mat.shape == (24, m._N_FEATURES)
     assert mat.dtype == np.float32
 
 def test_build_feature_matrix_route_id_column():
     import pulsecast.serving.main as m
 
-    mat = m._build_feature_matrix(route_id=42, horizon_hours=5, delay_index=0.0)
+    mat = m._build_feature_matrix(
+        route_id=42, horizon_hours=5, travel_time_var=0.0, sample_count=15
+    )
     assert np.all(mat[:, 0] == 42.0)
 
 def test_build_feature_matrix_horizon_steps():
@@ -51,22 +55,44 @@ def test_build_feature_matrix_horizon_steps():
     import pulsecast.serving.main as m
 
     horizon_hours = 6
-    mat = m._build_feature_matrix(route_id=1, horizon_hours=horizon_hours, delay_index=0.0)
+    mat = m._build_feature_matrix(
+        route_id=1, horizon_hours=horizon_hours, travel_time_var=0.0, sample_count=15
+    )
     expected = np.arange(1, horizon_hours + 1, dtype=np.float32)
     np.testing.assert_array_equal(mat[:, 1], expected)
 
 def test_build_feature_matrix_delay_index_column():
+    """Column 2 now stores travel_time_var (aliased as delay_index)."""
     import pulsecast.serving.main as m
 
-    mat = m._build_feature_matrix(route_id=1, horizon_hours=4, delay_index=3.7)
+    mat = m._build_feature_matrix(
+        route_id=1, horizon_hours=4, travel_time_var=3.7, sample_count=15
+    )
     np.testing.assert_allclose(mat[:, 2], 3.7)
 
 def test_build_feature_matrix_7day_rows():
     """A 7-day horizon must yield exactly 168 rows."""
     import pulsecast.serving.main as m
 
-    mat = m._build_feature_matrix(route_id=1, horizon_hours=168, delay_index=0.0)
+    mat = m._build_feature_matrix(
+        route_id=1, horizon_hours=168, travel_time_var=0.0, sample_count=15
+    )
     assert mat.shape[0] == 168
+
+def test_build_feature_matrix_low_confidence_flag():
+    import pulsecast.serving.main as m
+
+    # sample_count < 10 should set index 42 to 1.0
+    mat = m._build_feature_matrix(
+        route_id=1, horizon_hours=1, travel_time_var=0.0, sample_count=5
+    )
+    assert mat[0, 42] == 1.0
+
+    # sample_count >= 10 should set index 42 to 0.0
+    mat = m._build_feature_matrix(
+        route_id=1, horizon_hours=1, travel_time_var=0.0, sample_count=10
+    )
+    assert mat[0, 42] == 0.0
 
 # ---------------------------------------------------------------------------
 # _run_onnx
@@ -126,7 +152,8 @@ def test_forecast_7day_makes_exactly_3_onnx_calls():
     empty = np.empty(0, dtype=np.float32)
     with (
         patch.object(m, "_sessions", mock_sessions),
-        patch.object(m, "_fetch_delay_index", return_value=0.0),
+        patch.object(m, "_fetch_bus_congestion", return_value=(0.0, 15)),
+        patch.object(m, "_fetch_subway_delay", return_value=0.0),
         patch.object(m, "_fetch_demand_history", return_value=empty),
         patch.object(m, "_fetch_congestion_history", return_value=empty),
         patch.object(m._cache, "get", return_value=None),
@@ -154,7 +181,8 @@ def test_forecast_response_length_matches_horizon():
         empty = np.empty(0, dtype=np.float32)
         with (
             patch.object(m, "_sessions", mock_sessions),
-            patch.object(m, "_fetch_delay_index", return_value=0.0),
+            patch.object(m, "_fetch_bus_congestion", return_value=(0.0, 15)),
+            patch.object(m, "_fetch_subway_delay", return_value=0.0),
             patch.object(m, "_fetch_demand_history", return_value=empty),
             patch.object(m, "_fetch_congestion_history", return_value=empty),
             patch.object(m._cache, "get", return_value=None),

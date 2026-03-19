@@ -1,19 +1,13 @@
-"""Build stop_id -> TLC taxi zone mapping from public GTFS + TLC spatial data.
+"""Build subway stop_id -> TLC taxi zone mapping from public GTFS + TLC spatial data.
 
 This script:
 1) Downloads MTA GTFS static feed (stops.txt).
 2) Downloads TLC taxi zone polygons.
 3) Spatially joins stop points to polygons.
-4) Writes pulsecast/data/stop_to_zone.csv.
+4) Writes pulsecast/data/subway_zone_map.csv.
 
 Usage:
-    python scripts/build_stop_zone_map.py
-
-Optional arguments:
-    --gtfs-static-url URL
-    --taxi-zones-url URL
-    --output PATH
-    --workdir PATH
+    python scripts/build_subway_zone_map.py
 """
 
 from __future__ import annotations
@@ -30,11 +24,10 @@ import requests
 
 DEFAULT_GTFS_STATIC_URL = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip"
 DEFAULT_TAXI_ZONES_URL = "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip"
-DEFAULT_OUTPUT = Path("pulsecast/data/stop_to_zone.csv")
+DEFAULT_OUTPUT = Path("pulsecast/data/subway_zone_map.csv")
 
 
 def _safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
-    """Extract zip members after validating that paths stay inside destination."""
     destination = destination.resolve()
     destination.mkdir(parents=True, exist_ok=True)
 
@@ -138,7 +131,7 @@ def build_mapping(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build stop_id -> TLC zone mapping from GTFS static and taxi zones data."
+        description="Build subway stop_id -> TLC zone mapping."
     )
     parser.add_argument("--gtfs-static-url", default=DEFAULT_GTFS_STATIC_URL)
     parser.add_argument("--taxi-zones-url", default=DEFAULT_TAXI_ZONES_URL)
@@ -155,7 +148,7 @@ def main() -> None:
         output_path=args.output,
         workdir=args.workdir,
     )
-    print(f"Wrote stop-to-zone mapping to {output}")
+    print(f"Wrote subway-stop-to-zone mapping to {output}")
 
 
 if __name__ == "__main__":

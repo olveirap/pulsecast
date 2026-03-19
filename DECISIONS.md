@@ -2,33 +2,38 @@
 
 ---
 
-## ADR-001 – GTFS-RT as Congestion Covariate
+## ADR-001b – Bus Position Variance as Primary Congestion Covariate
 
-**Status:** Accepted
+**Status:** Accepted (Supersedes ADR-001)
 
 **Context:**  
-Taxi demand in NYC is strongly correlated with subway and bus network
-disruptions.  When transit is delayed or suspended, ride-hail demand
-spikes — particularly for routes near major transit hubs.
+The original GTFS-RT `delay_index` design (ADR-001) was not viable for
+training because no historical GTFS-RT archive exists.  Forecast models
+require a congestion covariate that is available both historically (for
+training) and in real-time (for inference).
 
 **Decision:**  
-Use the MTA GTFS-Realtime trip-updates feed as the primary congestion
-covariate.  A `delay_index` metric — defined as the mean arrival delay
-(in seconds) weighted by trip count, grouped by TLC zone and truncated
-hour — is computed every 60 seconds and stored in TimescaleDB.
+Use the NYC Bus Positions dataset (`s3://nycbuspositions`) as the primary
+congestion covariate.  A `travel_time_var` metric — defined as the
+variance of segment travel times for buses within a TLC zone and truncated
+hour — is computed and stored in the `congestion` table.  MTA subway
+GTFS-RT delays are retained as a supplementary real-time signal in the
+`subway_delay` table.
 
 **Rationale:**
-- GTFS-RT is published under an open-data licence, freely available at
-  `https://api.mta.info/GTFS`.
-- The `delay_index` aggregation reduces the high cardinality of raw
-  stop-level updates to a single, zone-level signal that aligns with the
-  granularity of TLC demand data.
-- Real-time ingestion (60-second polling) keeps the signal current enough
-  to influence short-term (1–7 day) forecasts.
+- **Training availability:** Historical bus positions exist for ~18 months
+  on S3, enabling the covariate to be included in the training set.
+- **Signal quality:** Travel time variance is a more robust proxy for
+  unpredictable traffic congestion than mean arrival delay, which is
+  often confounded by scheduled buffer time.
+- **Asymmetric roles:** Bus positions provide the consistent signal
+  required for the ONNX feature vector; subway RT provides high-frequency
+  disruption signals for the serving layer.
 
 **Alternatives considered:**
-- Traffic speed APIs (e.g., HERE, TomTom): paid, higher latency.
-- Weather APIs: complementary but not a direct proxy for transit demand.
+- GTFS-RT (ADR-001): Dropped due to lack of historical archive.
+- Paid traffic APIs (HERE/TomTom): Dropped due to cost and licensing
+  restrictions for open-source distribution.
 
 ---
 
@@ -61,35 +66,30 @@ absolute difference < 1e-3) is performed at export time.
 
 ---
 
-## ADR-003 – delay_index Bucketing in Cache Key
+## ADR-003b – Travel Time Variance Bucketing in Cache Key
 
-**Status:** Accepted
+**Status:** Accepted (Updates ADR-003)
 
 **Context:**  
-The Redis cache key includes the current `delay_index` value.  If the raw
-floating-point value is used, minor fluctuations in congestion (e.g.,
-140.23 vs 140.27 seconds mean delay) would cause unnecessary cache misses
-and redundant ONNX inferences.
+The Redis cache key includes the current congestion value.  With the shift
+from mean delay (seconds) to travel time variance (seconds squared), the
+original 0.5 bucketing resolution is too fine.
 
 **Decision:**  
-Round the `delay_index` to the nearest 0.5 before constructing the cache
-key.
+Round the `travel_time_var` to the nearest 10.0 before constructing the
+cache key.
 
 **Rationale:**
-- A rounding resolution of 0.5 seconds is finer than the measurement noise
-  in the GTFS-RT feed (which is reported in whole seconds per stop).
-- It dramatically increases cache hit rate — empirically, 90 %+ of
-  real-time delay values fall within 0.25 seconds of the nearest 0.5
-  boundary.
-- The resulting forecast error introduced by this approximation is well
-  below the model's inherent uncertainty (quantile interval width).
+- Variance values are numerically larger and more volatile than mean
+  delays.  A 10.0 bucket size (equivalent to ~3.2s standard deviation
+  fluctuation) provides a stable cache key without masking meaningful
+  congestion trends.
+- Empirically, variance buckets of this size align with the sensitivity
+  of the LightGBM models observed during Phase 0 EDA.
 
 **Alternatives considered:**
-- No bucketing (raw float): unacceptably low cache hit rate.
-- Bucket to nearest 1.0: coarser than necessary; could mask genuine
-  disruptions at the boundary (e.g., 1.9 → 2.0 disruption threshold).
-- Ignore delay_index in cache key: incorrect — different congestion levels
-  produce materially different forecasts.
+- Previous 0.5 bucket: Results in near-zero cache hit rate for variance
+  signals.
+- Dynamic bucketing: Too complex for a low-latency serving layer.
 
 ---
-

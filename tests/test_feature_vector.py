@@ -68,7 +68,8 @@ def _make_pool_mock(conn_mock: MagicMock) -> MagicMock:
 
 def _make_static(
     route_id: int = 1,
-    delay_index: float = 0.0,
+    travel_time_var: float = 0.0,
+    sample_count: int = 15,
     demand: np.ndarray | None = None,
     cong: np.ndarray | None = None,
 ) -> np.ndarray:
@@ -77,7 +78,7 @@ def _make_static(
         demand = _FULL_DEMAND
     if cong is None:
         cong = _FULL_CONG
-    return _build_static_features(route_id, delay_index, demand, cong)
+    return _build_static_features(route_id, travel_time_var, demand, cong, sample_count)
 
 
 # ---------------------------------------------------------------------------
@@ -86,21 +87,21 @@ def _make_static(
 
 class TestBuildStaticFeatures:
     def test_shape_with_full_history(self):
-        static = _build_static_features(132, 0.5, _FULL_DEMAND, _FULL_CONG)
+        static = _build_static_features(132, 0.5, _FULL_DEMAND, _FULL_CONG, 15)
         assert static.shape == (_N_FEATURES,)
 
     def test_dtype_is_float32(self):
-        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG)
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG, 15)
         assert static.dtype == np.float32
 
     def test_basic_slots(self):
-        static = _build_static_features(132, 2.5, _FULL_DEMAND, _FULL_CONG)
+        static = _build_static_features(132, 2.5, _FULL_DEMAND, _FULL_CONG, 15)
         assert static[0] == pytest.approx(132.0)  # route_id
         assert static[1] == pytest.approx(0.0)    # horizon_hours placeholder
-        assert static[2] == pytest.approx(2.5)    # delay_index
+        assert static[2] == pytest.approx(2.5)    # delay_index (travel_time_var)
 
     def test_demand_lags_filled_with_full_history(self):
-        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG)
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG, 15)
         # lag_1h at index 16 → _FULL_DEMAND[-1] = 167
         assert static[16] == pytest.approx(167.0)
         # lag_168h at index 27 → _FULL_DEMAND[0] = 0
@@ -108,18 +109,26 @@ class TestBuildStaticFeatures:
 
     def test_demand_lags_zero_when_empty(self):
         empty = np.empty(0, dtype=np.float32)
-        static = _build_static_features(1, 0.0, empty, empty)
+        static = _build_static_features(1, 0.0, empty, empty, 15)
         assert np.all(static[16:28] == 0.0)
 
     def test_rolling_mean_3h(self):
-        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG)
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG, 15)
         # rolling_mean_3h at index 28 = mean of last 3 values: 165, 166, 167
         assert static[28] == pytest.approx(np.mean([165.0, 166.0, 167.0]))
 
     def test_congestion_lag1_filled(self):
         cong = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        static = _build_static_features(1, 0.0, _FULL_DEMAND, cong)
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, cong, 15)
         assert static[38] == pytest.approx(0.3)  # delay_index_lag1
+
+    def test_low_confidence_flag_set(self):
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG, 5)
+        assert static[42] == 1.0
+
+    def test_low_confidence_flag_unset(self):
+        static = _build_static_features(1, 0.0, _FULL_DEMAND, _FULL_CONG, 15)
+        assert static[42] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -128,29 +137,29 @@ class TestBuildStaticFeatures:
 
 class TestBuildFeatureVector:
     def test_shape_with_full_history(self):
-        static = _make_static(132, 0.5)
+        static = _make_static(132, 0.5, 15)
         vec = _build_feature_vector(1, static)
         assert vec.shape == (1, _N_FEATURES), f"Expected (1, {_N_FEATURES}), got {vec.shape}"
 
     def test_shape_with_empty_history(self):
         empty = np.empty(0, dtype=np.float32)
-        static = _make_static(1, 0.0, demand=empty, cong=empty)
+        static = _make_static(1, 0.0, 15, demand=empty, cong=empty)
         vec = _build_feature_vector(24, static)
         assert vec.shape == (1, _N_FEATURES)
 
     def test_shape_with_partial_history(self):
         partial_demand = np.ones(10, dtype=np.float32) * 50.0
         partial_cong = np.ones(5, dtype=np.float32) * 1.2
-        static = _make_static(42, 1.5, demand=partial_demand, cong=partial_cong)
+        static = _make_static(42, 1.5, 15, demand=partial_demand, cong=partial_cong)
         vec = _build_feature_vector(12, static)
         assert vec.shape == (1, _N_FEATURES)
 
     def test_dtype_is_float32(self):
-        vec = _build_feature_vector(1, _make_static(1, 0.0))
+        vec = _build_feature_vector(1, _make_static(1, 0.0, 15))
         assert vec.dtype == np.float32
 
     def test_horizon_hours_filled(self):
-        static = _make_static(132, 2.5)
+        static = _make_static(132, 2.5, 15)
         vec = _build_feature_vector(6, static)
         flat = vec.flatten()
         assert flat[0] == pytest.approx(132.0)  # route_id (from static)
@@ -158,7 +167,7 @@ class TestBuildFeatureVector:
         assert flat[2] == pytest.approx(2.5)    # delay_index (from static)
 
     def test_demand_lags_preserved(self):
-        static = _make_static(1, 0.0)
+        static = _make_static(1, 0.0, 15)
         vec = _build_feature_vector(1, static)
         flat = vec.flatten()
         assert flat[16] == pytest.approx(167.0)  # lag_1h
@@ -166,32 +175,32 @@ class TestBuildFeatureVector:
 
     def test_demand_lags_zero_when_empty(self):
         empty = np.empty(0, dtype=np.float32)
-        static = _make_static(1, 0.0, demand=empty, cong=empty)
+        static = _make_static(1, 0.0, 15, demand=empty, cong=empty)
         vec = _build_feature_vector(1, static)
         flat = vec.flatten()
         assert np.all(flat[16:28] == 0.0)
 
     def test_rolling_mean_3h_preserved(self):
-        static = _make_static(1, 0.0)
+        static = _make_static(1, 0.0, 15)
         vec = _build_feature_vector(1, static)
         flat = vec.flatten()
         assert flat[28] == pytest.approx(np.mean([165.0, 166.0, 167.0]))
 
     def test_congestion_lag1_preserved(self):
         cong = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        static = _make_static(1, 0.0, cong=cong)
+        static = _make_static(1, 0.0, 15, cong=cong)
         vec = _build_feature_vector(1, static)
         flat = vec.flatten()
         assert flat[38] == pytest.approx(0.3)  # delay_index_lag1
 
     def test_not_all_zeros_with_real_data(self):
-        static = _make_static(5, 1.0)
+        static = _make_static(5, 1.0, 15)
         vec = _build_feature_vector(3, static)
         assert not np.all(vec == 0.0)
 
     def test_static_not_mutated(self):
         """_build_feature_vector must not modify the passed static array."""
-        static = _make_static(1, 0.0)
+        static = _make_static(1, 0.0, 15)
         original = static.copy()
         _build_feature_vector(12, static)
         np.testing.assert_array_equal(static, original)
@@ -330,7 +339,7 @@ class TestFeatureVectorWithMockedDB:
             d_hist = _fetch_demand_history(132)
             c_hist = _fetch_congestion_history(132)
 
-        static = _build_static_features(132, 1.2, d_hist, c_hist)
+        static = _build_static_features(132, 1.2, d_hist, c_hist, 15)
         vec = _build_feature_vector(24, static)
         assert vec.shape == (1, _N_FEATURES)
         assert vec.dtype == np.float32

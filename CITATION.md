@@ -13,16 +13,27 @@ New York City Taxi and Limousine Commission (TLC).
   New York City Taxi and Limousine Commission (TLC). *TLC Trip Record Data*.
   Published on NYC Open Data. Accessed 2024–2026.
 
-The TLC data is provided "as is" without warranty.  Users are responsible
-for ensuring their use complies with applicable laws and NYC Open Data
-terms of service.
+---
+
+## NYC Bus Positions
+
+This project utilizes the NYC Bus Positions dataset, a historical and
+real-time archive of bus vehicle positions and trajectories.
+
+- **Source:** NYC Bus Positions Archive (hosted on S3)  
+  `s3://nycbuspositions`
+- **Licence:** NYC Open Data Terms of Use  
+- **Citation:**  
+  Metropolitan Transportation Authority (MTA) / NYC Open Data. 
+  *NYC Bus Positions Archive*. Published on NYC Open Data and Amazon S3.
+  Accessed 2024–2026.
 
 ---
 
 ## MTA GTFS-Realtime Feed
 
 This project polls the Metropolitan Transportation Authority (MTA)
-GTFS-Realtime trip-updates feed to derive congestion signals.
+GTFS-Realtime trip-updates feed for supplementary congestion signals.
 
 - **Source:** MTA Developer Resources – GTFS-Realtime  
   <https://api.mta.info/>
@@ -33,11 +44,6 @@ GTFS-Realtime trip-updates feed to derive congestion signals.
 - **Citation:**  
   Metropolitan Transportation Authority (MTA). *GTFS-Realtime Trip Updates*.
   <https://api.mta.info/GTFS>. Accessed 2024–2026.
-
-**Important:** Users must register for a free MTA API key and agree to the
-MTA developer terms before polling the feed.  Automated polling must comply
-with rate limits specified in those terms (currently one request per 30
-seconds per feed per API key).
 
 ---
 
@@ -56,3 +62,5 @@ Key open-source libraries used in this project:
 | mlflow | Apache-2.0 | <https://mlflow.org/> |
 | evidently | Apache-2.0 | <https://www.evidentlyai.com/> |
 | gtfs-realtime-bindings | Apache-2.0 | <https://github.com/MobilityData/gtfs-realtime-bindings> |
+| geopandas | BSD-3-Clause | <https://geopandas.org/> |
+| boto3 | Apache-2.0 | <https://github.com/boto/boto3> |

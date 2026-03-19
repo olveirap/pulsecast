@@ -185,7 +185,8 @@ def _congestion_df(n: int = 20, zone_ids: list[int] | None = None) -> pl.DataFra
                 {
                     "zone_id": zid,
                     "hour": _BASE_HOUR + timedelta(hours=i),
-                    "delay_index": float(i % 5) * 0.4,
+                    "travel_time_var": float(i % 5) * 0.4,
+                    "sample_count": 15 if i % 10 != 0 else 5,  # some low confidence rows
                 }
             )
     return pl.DataFrame(rows)
@@ -193,14 +194,19 @@ def _congestion_df(n: int = 20, zone_ids: list[int] | None = None) -> pl.DataFra
 
 def test_congestion_output_columns():
     df = build_congestion_features(_congestion_df())
-    for col in ("delay_index_lag1", "delay_index_rolling3h", "disruption_flag"):
+    for col in (
+        "delay_index_lag1", 
+        "delay_index_rolling3h", 
+        "disruption_flag", 
+        "low_confidence_flag"
+    ):
         assert col in df.columns, f"Missing column: {col}"
 
 
 def test_congestion_lag1_is_previous_value():
     df = build_congestion_features(_congestion_df(n=5))
     lag = df["delay_index_lag1"].to_list()
-    raw = df["delay_index"].to_list()
+    raw = df["travel_time_var"].to_list()
     assert lag[0] is None
     assert lag[1] == pytest.approx(raw[0])
 
@@ -209,6 +215,14 @@ def test_congestion_disruption_flag_binary():
     df = build_congestion_features(_congestion_df(n=30))
     flags = df["disruption_flag"].to_list()
     assert all(f in (0, 1, None) for f in flags)
+
+
+def test_congestion_low_confidence_flag():
+    df = build_congestion_features(_congestion_df(n=10))
+    # In _congestion_df, i=0 has sample_count=5, i=1..9 have sample_count=15
+    flags = df["low_confidence_flag"].to_list()
+    assert flags[0] == 1
+    assert all(f == 0 for f in flags[1:])
 
 
 def test_congestion_no_cross_zone_leakage():
