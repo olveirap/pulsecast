@@ -2,7 +2,7 @@
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PYTHON   ?= python
-UV       ?= uv
+POETRY   ?= poetry
 MONTHS   ?= 24
 HORIZON  ?= 7
 BACKFILL_START ?= $(shell date -d '18 months ago' +%Y-%m-%d 2>/dev/null || date -v-18m +%Y-%m-%d)
@@ -10,50 +10,40 @@ BACKFILL_END   ?= $(shell date +%Y-%m-%d)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest:
-	$(PYTHON) -m pulsecast.data.ingest.tlc
+	$(POETRY) run python -m pulsecast.data.ingest.tlc
 
 # ── GTFS-RT backfill ─────────────────────────────────────────────────────────
 backfill:
-	$(PYTHON) -m pulsecast.data.ingest.gtfs_rt_backfill \
+	$(POETRY) run python -m pulsecast.data.ingest.gtfs_rt_backfill \
 		--start $(BACKFILL_START) \
 		--end   $(BACKFILL_END)
 
 build-stop-zone-map:
-	$(PYTHON) scripts/build_stop_zone_map.py
+	$(POETRY) run python scripts/build_stop_zone_map.py
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:
-	$(PYTHON) -c "\
-import polars as pl; \
-from pulsecast.features.demand import build_demand_features; \
-from pulsecast.features.calendar import build_calendar_features; \
-from pulsecast.features.congestion import build_congestion_features; \
-print('Feature modules imported successfully.')"
+	$(POETRY) run python scripts/run_features.py
 
 # ── Model training ────────────────────────────────────────────────────────────
 train:
-	$(PYTHON) -c "\
-from pulsecast.models.baseline import BaselineForecaster; \
-from pulsecast.models.lgbm import LGBMForecaster; \
-print('Model modules imported successfully.')"
+	$(POETRY) run python scripts/run_train.py
 
 # ── ONNX export ───────────────────────────────────────────────────────────────
 export:
-	$(PYTHON) -c "\
-from pulsecast.models.export import export_lgbm_to_onnx; \
-print('Export module imported successfully.')"
+	$(POETRY) run python scripts/run_export.py
 
 # ── Serving (local dev) ───────────────────────────────────────────────────────
 serve:
-	uvicorn pulsecast.serving.main:app --reload --host 0.0.0.0 --port 8000
+	$(POETRY) run uvicorn pulsecast.serving.main:app --reload --host 0.0.0.0 --port 8000
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 dashboard:
-	streamlit run pulsecast/dashboard/app.py
+	$(POETRY) run streamlit run pulsecast/dashboard/app.py
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 test:
-	pytest tests/ -v --tb=short
+	$(POETRY) run pytest tests/ -v --tb=short
 
 # ── Docker helpers ────────────────────────────────────────────────────────────
 up:
@@ -67,4 +57,4 @@ logs:
 
 # ── Install dependencies ──────────────────────────────────────────────────────
 install:
-	$(UV) sync
+	$(POETRY) install
