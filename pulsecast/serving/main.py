@@ -23,6 +23,7 @@ import numpy as np
 import psycopg2
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from pulsecast.features.calendar import scalar_calendar_features
 from pulsecast.serving.cache import ForecastCache
@@ -403,10 +404,16 @@ async def calibration() -> CalibrationResponse:
         raise HTTPException(status_code=500, detail="Unable to read calibration file") from exc
     try:
         payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.error("Malformed JSON in calibration file %s: %s", _CALIBRATION_PATH, exc)
+        raise HTTPException(status_code=500, detail="Malformed JSON in calibration file") from exc
+    try:
         return CalibrationResponse(**payload)
-    except Exception as exc:
-        logger.error("Invalid calibration file %s: %s", _CALIBRATION_PATH, exc)
-        raise HTTPException(status_code=500, detail="Invalid JSON format in calibration file") from exc
+    except (ValidationError, TypeError) as exc:
+        logger.error("Schema mismatch in calibration file %s: %s", _CALIBRATION_PATH, exc)
+        raise HTTPException(
+            status_code=500, detail="Calibration file schema does not match expected format"
+        ) from exc
 
 @app.post("/forecast", response_model=ForecastResponse)
 async def forecast(request: ForecastRequest, raw_request: Request) -> Response:

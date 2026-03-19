@@ -235,7 +235,7 @@ def test_calibration_returns_200_with_valid_file(app_client, tmp_path):
 
 
 def test_calibration_returns_500_on_malformed_file(app_client, tmp_path):
-    """GET /calibration must return 500 when the file contains invalid JSON."""
+    """GET /calibration must return 500 with a JSON-specific message on invalid JSON."""
     client, main_mod, _ = app_client
     bad_file = tmp_path / "calibration.json"
     bad_file.write_text("not valid json {{{")
@@ -244,3 +244,17 @@ def test_calibration_returns_500_on_malformed_file(app_client, tmp_path):
         resp = client.get("/calibration")
 
     assert resp.status_code == 500
+    assert "malformed json" in resp.json()["detail"].lower()
+
+
+def test_calibration_returns_500_on_schema_mismatch(app_client, tmp_path):
+    """GET /calibration must return 500 with a schema message when JSON is valid but wrong shape."""
+    client, main_mod, _ = app_client
+    bad_file = tmp_path / "calibration.json"
+    bad_file.write_text(json.dumps({"wrong_key": [1, 2, 3]}))
+
+    with patch.object(main_mod, "_CALIBRATION_PATH", bad_file):
+        resp = client.get("/calibration")
+
+    assert resp.status_code == 500
+    assert "schema" in resp.json()["detail"].lower()

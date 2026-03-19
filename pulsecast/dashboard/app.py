@@ -43,16 +43,16 @@ def fetch_forecast(route_id: int, horizon: int) -> dict | None:
 
 @st.cache_data(ttl=300)
 def fetch_calibration() -> dict | None:
-    """Fetch empirical calibration data from the API; returns None if unavailable."""
-    try:
-        resp = requests.get(f"{_API_URL}/calibration", timeout=10)
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        _logger.warning("Could not fetch calibration data: %s", exc)
+    """Fetch empirical calibration data from the API.
+
+    Returns the data dict on success, ``None`` on 404 (evaluation not run yet).
+    Raises ``requests.RequestException`` on connectivity or other API errors.
+    """
+    resp = requests.get(f"{_API_URL}/calibration", timeout=10)
+    if resp.status_code == 404:
         return None
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _fan_chart(data: dict, horizon: int) -> None:
@@ -164,11 +164,16 @@ def main() -> None:
 
             _fan_chart(data, int(horizon))
 
-    calibration_data = fetch_calibration()
-    if calibration_data:
-        _calibration_chart(calibration_data)
+    try:
+        calibration_data = fetch_calibration()
+    except requests.RequestException as exc:
+        _logger.warning("Could not fetch calibration data: %s", exc)
+        st.warning("⚠️ Unable to reach the forecast API – calibration data unavailable.")
     else:
-        st.info("📊 Calibration data unavailable – run evaluation first.")
+        if calibration_data:
+            _calibration_chart(calibration_data)
+        else:
+            st.info("📊 Calibration data unavailable – run evaluation first.")
 
     _ablation_panel()
 
