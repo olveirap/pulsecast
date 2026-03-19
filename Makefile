@@ -29,7 +29,6 @@ backfill:
 # ── Spatial Mappings ──────────────────────────────────────────────────────────
 # NOTE: requires [geo] extras (geopandas, shapely, etc.)
 build-zone-maps:
-	$(POETRY) run python scripts/build_bus_zone_map.py
 	$(POETRY) run python scripts/build_subway_zone_map.py
 
 # ── Feature engineering ───────────────────────────────────────────────────────
