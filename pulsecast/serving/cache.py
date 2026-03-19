@@ -1,7 +1,7 @@
 """
 cache.py – Redis cache layer for the Pulsecast serving API.
 
-Delay index values are bucketed to the nearest 0.5 before being used as
+Bus variance values are bucketed to a calibrated size before being used as
 part of the cache key, so that near-identical congestion conditions hit the
 same cached forecast.
 """
@@ -18,14 +18,18 @@ logger = logging.getLogger(__name__)
 _REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 _TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "300"))  # 5 minutes default
 
+# Bucket size for travel_time_var. Recalibrated from 0.5 (seconds) 
+# to a variance-appropriate scale.
+_CONGESTION_BUCKET_SIZE = float(os.getenv("CONGESTION_BUCKET_SIZE", "10.0"))
 
-def _bucket_delay(delay_index: float, bucket_size: float = 0.5) -> float:
-    """Round *delay_index* to the nearest *bucket_size*."""
-    return round(round(delay_index / bucket_size) * bucket_size, 6)
+
+def _bucket_congestion(value: float, bucket_size: float = _CONGESTION_BUCKET_SIZE) -> float:
+    """Round *value* to the nearest *bucket_size*."""
+    return round(round(value / bucket_size) * bucket_size, 6)
 
 
-def _make_key(route_id: int, horizon: int, delay_index: float) -> str:
-    bucketed = _bucket_delay(delay_index)
+def _make_key(route_id: int, horizon: int, congestion_val: float) -> str:
+    bucketed = _bucket_congestion(congestion_val)
     return f"forecast:{route_id}:{horizon}:{bucketed}"
 
 
@@ -57,12 +61,12 @@ class ForecastCache:
         self._ttl = ttl
 
     def get(
-        self, route_id: int, horizon: int, delay_index: float
+        self, route_id: int, horizon: int, congestion_val: float
     ) -> dict[str, Any] | None:
         """
         Retrieve a cached forecast, or *None* on cache miss.
         """
-        key = _make_key(route_id, horizon, delay_index)
+        key = _make_key(route_id, horizon, congestion_val)
         raw = self._client.get(key)
         if raw is None:
             logger.debug("Cache MISS for key=%s", key)
@@ -74,12 +78,12 @@ class ForecastCache:
         self,
         route_id: int,
         horizon: int,
-        delay_index: float,
+        congestion_val: float,
         payload: dict[str, Any],
     ) -> None:
         """
         Store a forecast payload, expiring after *ttl* seconds.
         """
-        key = _make_key(route_id, horizon, delay_index)
+        key = _make_key(route_id, horizon, congestion_val)
         self._client.set(key, json.dumps(payload), ex=self._ttl)
         logger.debug("Cache SET for key=%s (ttl=%ds)", key, self._ttl)

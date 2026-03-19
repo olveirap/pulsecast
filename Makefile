@@ -1,4 +1,4 @@
-.PHONY: ingest backfill build-stop-zone-map features train export serve test
+.PHONY: ingest ingest-tlc ingest-subway ingest-bus backfill build-zone-maps features train export serve test
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PYTHON   ?= python
@@ -9,17 +9,27 @@ BACKFILL_START ?= $(shell date -d '18 months ago' +%Y-%m-%d 2>/dev/null || date 
 BACKFILL_END   ?= $(shell date +%Y-%m-%d)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
-ingest:
+ingest: ingest-tlc ingest-subway ingest-bus
+
+ingest-tlc:
 	$(POETRY) run python -m pulsecast.data.ingest.tlc
 
-# ── GTFS-RT backfill ─────────────────────────────────────────────────────────
+ingest-subway:
+	$(POETRY) run python -m pulsecast.data.ingest.subway_rt
+
+ingest-bus:
+	$(POETRY) run python -m pulsecast.data.ingest.bus_positions
+
+# ── Backfill ─────────────────────────────────────────────────────────────────
 backfill:
-	$(POETRY) run python -m pulsecast.data.ingest.gtfs_rt_backfill \
+	$(POETRY) run python -m pulsecast.data.ingest.bus_positions_backfill \
 		--start $(BACKFILL_START) \
 		--end   $(BACKFILL_END)
 
-build-stop-zone-map:
-	$(POETRY) run python scripts/build_stop_zone_map.py
+# ── Spatial Mappings ──────────────────────────────────────────────────────────
+# NOTE: requires [geo] extras (geopandas, shapely, etc.)
+build-zone-maps:
+	$(POETRY) run python scripts/build_subway_zone_map.py
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:

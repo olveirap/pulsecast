@@ -29,30 +29,60 @@ ALTER TABLE demand SET (
 SELECT add_compression_policy('demand', INTERVAL '7 days', if_not_exists => TRUE);
 
 -- -----------------------------------------------------------------------
--- delay_index: MTA GTFS-Realtime congestion signal per zone/hour
+-- congestion: Bus position variance signal per zone/hour (training + RT)
 -- -----------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS delay_index (
-    zone_id          INTEGER     NOT NULL,
-    hour             TIMESTAMPTZ NOT NULL,
-    delay_index      DOUBLE PRECISION NOT NULL,
-    disruption_flag  BOOLEAN     NOT NULL DEFAULT FALSE,
+CREATE TABLE IF NOT EXISTS congestion (
+    zone_id          INTEGER          NOT NULL,
+    hour             TIMESTAMPTZ      NOT NULL,
+    travel_time_var  DOUBLE PRECISION NOT NULL,
+    sample_count     INTEGER          NOT NULL,
+    disruption_flag  BOOLEAN          NOT NULL DEFAULT FALSE,
     PRIMARY KEY (zone_id, hour)
 );
 
 SELECT create_hypertable(
-    'delay_index',
+    'congestion',
     'hour',
     chunk_time_interval => INTERVAL '1 day',
     if_not_exists => TRUE
 );
 
-ALTER TABLE delay_index SET (
+ALTER TABLE congestion SET (
     timescaledb.compress,
     timescaledb.compress_segmentby = 'zone_id'
 );
 
-SELECT add_compression_policy('delay_index', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_compression_policy('congestion', INTERVAL '7 days', if_not_exists => TRUE);
 
 -- Useful index for serving-layer look-ups.
-CREATE INDEX IF NOT EXISTS idx_delay_index_zone_hour
-    ON delay_index (zone_id, hour DESC);
+CREATE INDEX IF NOT EXISTS idx_congestion_zone_hour
+    ON congestion (zone_id, hour DESC);
+
+-- -----------------------------------------------------------------------
+-- subway_delay: MTA GTFS-Realtime subway delays (RT only)
+-- -----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS subway_delay (
+    zone_id     INTEGER          NOT NULL,
+    hour        TIMESTAMPTZ      NOT NULL,
+    feed_id     VARCHAR(32)      NOT NULL,
+    mean_delay  DOUBLE PRECISION NOT NULL,
+    trip_count  INTEGER          NOT NULL,
+    PRIMARY KEY (zone_id, hour, feed_id)
+);
+
+SELECT create_hypertable(
+    'subway_delay',
+    'hour',
+    chunk_time_interval => INTERVAL '1 day',
+    if_not_exists => TRUE
+);
+
+ALTER TABLE subway_delay SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'zone_id, feed_id'
+);
+
+SELECT add_compression_policy('subway_delay', INTERVAL '7 days', if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS idx_subway_delay_zone_hour
+    ON subway_delay (zone_id, hour DESC);

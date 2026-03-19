@@ -5,7 +5,7 @@ validation.
 Usage
 -----
 >>> from pulsecast.models.export import export_lgbm_to_onnx
->>> export_lgbm_to_onnx(forecaster, n_features=42, output_dir="models/onnx")
+>>> export_lgbm_to_onnx(forecaster, n_features=43, output_dir="models/onnx")
 """
 
 from __future__ import annotations
