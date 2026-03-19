@@ -10,13 +10,12 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta
 
 import numpy as np
 import polars as pl
-import pytest
 
 # ---------------------------------------------------------------------------
 # Mocks for heavy imports

@@ -104,7 +104,8 @@ def train_tft(train_df: pl.DataFrame, val_df: pl.DataFrame) -> None:
         (pl.col("hour").rank("dense") - 1).cast(pl.Int32).alias("time_idx")
     )
     # Correctly aligning time_idx for validation
-    offset = train_df["time_idx"].max() + 1
+    max_time_idx = train_df.select(pl.col("time_idx").max().cast(pl.Int64)).item()
+    offset = int(max_time_idx) + 1
     val_df = val_df.with_columns(
         (pl.col("hour").rank("dense") - 1 + offset).cast(pl.Int32).alias("time_idx")
     )
