@@ -55,3 +55,16 @@ class ForecastResponse(BaseModel):
         "p50": [58.3],
         "p90": [75.6],
     }}}
+
+
+class CalibrationResponse(BaseModel):
+    """Empirical quantile calibration coverage from the held-out evaluation set."""
+
+    nominal: list[float] = Field(
+        ...,
+        description="Nominal quantile levels (e.g. [0.1, 0.5, 0.9]).",
+    )
+    observed: list[float] = Field(
+        ...,
+        description="Empirical coverage rates from the held-out evaluation set.",
+    )

@@ -11,6 +11,7 @@ GET  /health
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -25,7 +26,7 @@ from fastapi.responses import JSONResponse
 
 from pulsecast.features.calendar import scalar_calendar_features
 from pulsecast.serving.cache import ForecastCache
-from pulsecast.serving.schemas import ForecastRequest, ForecastResponse
+from pulsecast.serving.schemas import CalibrationResponse, ForecastRequest, ForecastResponse
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ _DB_DSN = os.getenv(
     "TIMESCALE_DSN",
     "postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast",
 )
+_CALIBRATION_PATH = Path(os.getenv("CALIBRATION_PATH", "data/results/calibration.json"))
 
 # Canonical ordered feature names – must stay in sync with _build_feature_matrix.
 _FEATURE_NAMES: list[str] = [
@@ -384,6 +386,27 @@ def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/calibration", response_model=CalibrationResponse)
+async def calibration() -> CalibrationResponse:
+    """Return empirical quantile coverage from the held-out evaluation set."""
+    if not _CALIBRATION_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Calibration data unavailable – run evaluation first",
+        )
+    try:
+        raw = _CALIBRATION_PATH.read_text()
+    except OSError as exc:
+        logger.error("Unable to read calibration file %s: %s", _CALIBRATION_PATH, exc)
+        raise HTTPException(status_code=500, detail="Unable to read calibration file") from exc
+    try:
+        payload = json.loads(raw)
+        return CalibrationResponse(**payload)
+    except Exception as exc:
+        logger.error("Invalid calibration file %s: %s", _CALIBRATION_PATH, exc)
+        raise HTTPException(status_code=500, detail="Invalid JSON format in calibration file") from exc
 
 @app.post("/forecast", response_model=ForecastResponse)
 async def forecast(request: ForecastRequest, raw_request: Request) -> Response:

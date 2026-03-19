@@ -11,6 +11,7 @@ Features
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pandas as pd
@@ -18,6 +19,7 @@ import requests
 import streamlit as st
 
 _API_URL = os.getenv("PULSECAST_API_URL", "http://localhost:8000")
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,6 +38,20 @@ def fetch_forecast(route_id: int, horizon: int) -> dict | None:
         return resp.json()
     except Exception as exc:
         st.error(f"API error: {exc}")
+        return None
+
+
+@st.cache_data(ttl=300)
+def fetch_calibration() -> dict | None:
+    """Fetch empirical calibration data from the API; returns None if unavailable."""
+    try:
+        resp = requests.get(f"{_API_URL}/calibration", timeout=10)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        _logger.warning("Could not fetch calibration data: %s", exc)
         return None
 
 
@@ -88,13 +104,12 @@ def _ablation_panel() -> None:
     st.dataframe(df, use_container_width=True)
 
 
-def _calibration_chart(data: dict) -> None:
+def _calibration_chart(calibration: dict) -> None:
     """Plot coverage probability vs. nominal quantile."""
     import plotly.graph_objects as go
 
-    # Placeholder calibration curve (diagonal = perfect calibration).
-    nominal = [0.1, 0.5, 0.9]
-    observed = [0.1, 0.5, 0.9]  # Replace with real empirical coverage
+    nominal = calibration["nominal"]
+    observed = calibration["observed"]
 
     fig = go.Figure()
     fig.add_trace(
@@ -148,7 +163,12 @@ def main() -> None:
             col3.metric("p90 (next hour)", f"{data['p90'][0]:.1f}")
 
             _fan_chart(data, int(horizon))
-            _calibration_chart(data)
+
+    calibration_data = fetch_calibration()
+    if calibration_data:
+        _calibration_chart(calibration_data)
+    else:
+        st.info("📊 Calibration data unavailable – run evaluation first.")
 
     _ablation_panel()
 
