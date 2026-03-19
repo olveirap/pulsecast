@@ -55,7 +55,7 @@ _FEATURE_NAMES: list[str] = [
     # ── Basic (3) ──────────────────────────────────────────────────────────
     "route_id",
     "horizon_hours",
-    "delay_index",
+    "delay_index",  # Now refers to travel_time_var
     # ── Calendar – target prediction hour (13) ─────────────────────────────
     "hour_of_day",
     "dow",
@@ -96,11 +96,12 @@ _FEATURE_NAMES: list[str] = [
     "ewm_trend_168h",
     # ── Year-over-year ratio (1) ────────────────────────────────────────────
     "yoy_ratio",
-    # ── Congestion (4) ─────────────────────────────────────────────────────
-    "delay_index_lag1",
-    "delay_index_lag24",
-    "delay_index_rolling3h",
+    # ── Congestion (5) ─────────────────────────────────────────────────────
+    "delay_index_lag1",      # travel_time_var lag1
+    "delay_index_lag24",     # travel_time_var lag24
+    "delay_index_rolling3h", # travel_time_var rolling3h
     "disruption_flag",
+    "low_confidence_flag",   # sample_count < 10
 ]
 
 _N_FEATURES: int = len(_FEATURE_NAMES)
@@ -176,9 +177,38 @@ def _get_conn():
         _db_pool.putconn(conn)
 
 
-def _fetch_delay_index(route_id: int) -> float:
+def _fetch_bus_congestion(zone_id: int) -> tuple[float, int]:
     """
-    Retrieve the latest delay_index for *route_id* from TimescaleDB.
+    Retrieve the latest travel_time_var and sample_count for *zone_id* 
+    from the congestion hypertable.
+    """
+    if _db_pool is None:
+        return 0.0, 0
+    try:
+        with _get_conn() as conn:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT travel_time_var, sample_count
+                        FROM congestion
+                        WHERE zone_id = %s
+                        ORDER BY hour DESC
+                        LIMIT 1
+                        """,
+                        (zone_id,),
+                    )
+                    row = cur.fetchone()
+        if row:
+            return float(row[0]), int(row[1])
+    except Exception:
+        logger.exception("Failed to fetch congestion data from TimescaleDB")
+    return 0.0, 0
+
+def _fetch_subway_delay(zone_id: int) -> float:
+    """
+    Retrieve the latest mean_delay for *zone_id* aggregated across 
+    relevant feeds from the subway_delay hypertable.
     """
     if _db_pool is None:
         return 0.0
@@ -188,19 +218,18 @@ def _fetch_delay_index(route_id: int) -> float:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT delay_index
-                        FROM delay_index
+                        SELECT SUM(mean_delay * trip_count) / NULLIF(SUM(trip_count), 0)
+                        FROM subway_delay
                         WHERE zone_id = %s
-                        ORDER BY hour DESC
-                        LIMIT 1
+                          AND hour > NOW() - INTERVAL '1 hour'
                         """,
-                        (route_id,),
+                        (zone_id,),
                     )
                     row = cur.fetchone()
-        if row:
+        if row and row[0] is not None:
             return float(row[0])
     except Exception:
-        logger.exception("Failed to fetch delay_index from TimescaleDB")
+        logger.exception("Failed to fetch subway_delay from TimescaleDB")
     return 0.0
 
 def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
@@ -235,10 +264,10 @@ def _fetch_demand_history(route_id: int, n_hours: int = 168) -> np.ndarray:
         logger.exception("Failed to fetch demand history from TimescaleDB")
     return np.empty(0, dtype=np.float32)
 
-def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
+def _fetch_congestion_history(zone_id: int, n_hours: int = 168) -> np.ndarray:
     """
-    Fetch the last *n_hours* of delay_index values for zone *route_id* from
-    the ``delay_index`` TimescaleDB hypertable.
+    Fetch the last *n_hours* of travel_time_var values for *zone_id* from
+    the ``congestion`` TimescaleDB hypertable.
 
     Returns a float32 array sorted oldest-first (index 0 = oldest hour,
     index -1 = most recent hour).  Returns an empty array on error.
@@ -251,13 +280,13 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT delay_index
-                        FROM delay_index
+                        SELECT travel_time_var
+                        FROM congestion
                         WHERE zone_id = %s
                         ORDER BY hour DESC
                         LIMIT %s
                         """,
-                        (route_id, n_hours),
+                        (zone_id, n_hours),
                     )
                     rows = cur.fetchall()
         if rows:
@@ -269,7 +298,8 @@ def _fetch_congestion_history(route_id: int, n_hours: int = 168) -> np.ndarray:
 
 def _build_static_features(
     route_id: int,
-    delay_index: float,
+    travel_time_var: float,
+    sample_count: int,
     demand_history: np.ndarray,
     congestion_history: np.ndarray,
 ) -> np.ndarray:
@@ -278,13 +308,13 @@ def _build_static_features(
 
     Populates indices:
       [0]     route_id
-      [2]     delay_index (live)
+      [2]     delay_index (live travel_time_var)
       [16-27] Demand lags (1,2,3,6,12,24,48,72,96,120,144,168 h)
       [28-34] Rolling means of demand (3,6,12,24,48,72,168 h)
       [35-36] EWM trend of demand (span=24, span=168)
       [37]    YoY ratio (0.0 sentinel when < 8760 h of history)
-      [38-41] Congestion: delay_index_lag1, delay_index_lag24,
-              delay_index_rolling3h, disruption_flag
+      [38-42] Congestion: delay_index_lag1, delay_index_lag24,
+              delay_index_rolling3h, disruption_flag, low_confidence_flag
 
     Indices 1 (horizon_hours) and 3-15 (calendar) are left at 0.0 for
     ``_build_feature_vector`` to fill per horizon step.
@@ -297,7 +327,7 @@ def _build_static_features(
 
     # ── Basic (static part) ────────────────────────────────────────────────
     features[0] = float(route_id)
-    features[2] = float(delay_index)
+    features[2] = float(travel_time_var)
 
     # ── Demand lag features ────────────────────────────────────────────────
     n_d = len(demand_history)
@@ -340,6 +370,8 @@ def _build_static_features(
         mean168 = float(np.mean(congestion_history[-168:]))
         std168 = float(np.std(congestion_history[-168:]))
         features[41] = 1.0 if float(congestion_history[-1]) > mean168 + 2.0 * std168 else 0.0
+    
+    features[42] = 1.0 if sample_count < 10 else 0.0
 
     return features
 
@@ -377,38 +409,27 @@ def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np
 def _build_feature_matrix(
     route_id: int,
     horizon_hours: int,
-    delay_index: float,
+    travel_time_var: float,
+    sample_count: int,
     demand_history: np.ndarray | None = None,
     congestion_history: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Construct a batch feature matrix for all horizon steps in one shot.
-
-    Fetches real demand and congestion history from TimescaleDB (when
-    *demand_history* / *congestion_history* are provided, uses those directly
-    to avoid redundant DB calls from the caller).
-
-    Returns an array of shape ``(horizon_hours, _N_FEATURES)`` where row ``i``
-    corresponds to the forecast step ``i + 1`` hours ahead.
     """
     if demand_history is None:
         demand_history = np.empty(0, dtype=np.float32)
     if congestion_history is None:
         congestion_history = np.empty(0, dtype=np.float32)
 
-    static = _build_static_features(route_id, delay_index, demand_history, congestion_history)
+    static = _build_static_features(
+        route_id, travel_time_var, sample_count, demand_history, congestion_history
+    )
     rows = [_build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)]
     return np.array(rows, dtype=np.float32)
 
 def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
-    """Run each quantile ONNX session exactly once with the full batch matrix.
-
-    Args:
-        features: Array of shape ``(horizon_hours, _N_FEATURES)``.
-
-    Returns:
-        Mapping of quantile name → list of ``horizon_hours`` predictions.
-    """
+    """Run each quantile ONNX session exactly once with the full batch matrix."""
     if not _sessions:
         raise HTTPException(status_code=503, detail="ONNX models not loaded.")
     results: dict[str, list[float]] = {}
@@ -427,9 +448,6 @@ async def health() -> dict[str, Any]:
     result: dict[str, Any] = {"status": "ok"}
     if _db_pool is not None:
         try:
-            # psycopg2 does not expose a public API for live pool stats; _pool
-            # (idle connections) and _used (borrowed connections) are private
-            # but stable across all 2.x releases.
             result["db_pool"] = {
                 "min": _db_pool.minconn,
                 "max": _db_pool.maxconn,
@@ -472,11 +490,16 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     t0 = time.perf_counter()
     horizon_hours = request.horizon * 24
 
-    # 1. Fetch live delay_index
-    delay_index = _fetch_delay_index(request.route_id)
+    # 1. Fetch live congestion and subway data
+    travel_time_var, sample_count = _fetch_bus_congestion(request.route_id)
+    subway_delay = _fetch_subway_delay(request.route_id)
+    
+    # Log subway_delay for now as it's a supplementary signal
+    if subway_delay > 0:
+        logger.info("Zone %d has subway delay: %.2fs", request.route_id, subway_delay)
 
-    # 2. Check cache
-    cached = _cache.get(request.route_id, request.horizon, delay_index)
+    # 2. Check cache (using travel_time_var as the key part)
+    cached = _cache.get(request.route_id, request.horizon, travel_time_var)
     if cached is not None:
         latency_ms = (time.perf_counter() - t0) * 1000
         resp_content: dict[str, Any] = {
@@ -489,13 +512,18 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
             headers={"X-Latency-Ms": f"{latency_ms:.1f}"},
         )
 
-    # 3. Fetch historical time series once (shared across all horizon steps)
+    # 3. Fetch historical time series once
     demand_history = _fetch_demand_history(request.route_id)
     congestion_history = _fetch_congestion_history(request.route_id)
 
-    # 4. Build batch feature matrix and run inference – exactly 3 ONNX calls total
+    # 4. Build batch feature matrix and run inference
     features = _build_feature_matrix(
-        request.route_id, horizon_hours, delay_index, demand_history, congestion_history
+        request.route_id, 
+        horizon_hours, 
+        travel_time_var, 
+        sample_count,
+        demand_history, 
+        congestion_history
     )
     preds = _run_onnx(features)
 
@@ -506,7 +534,7 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     }
 
     # 5. Store in cache
-    _cache.set(request.route_id, request.horizon, delay_index, payload)
+    _cache.set(request.route_id, request.horizon, travel_time_var, payload)
 
     latency_ms = (time.perf_counter() - t0) * 1000
     resp_content = {

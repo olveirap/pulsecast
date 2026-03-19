@@ -32,7 +32,7 @@ _OUT_DIR = Path(os.getenv("FEATURES_DIR", "data/features"))
 
 
 def load_from_timescaledb() -> pl.DataFrame:
-    """Fetch demand and delay_index from TimescaleDB and join them."""
+    """Fetch demand and congestion variance from TimescaleDB and join them."""
     logger.info("Connecting to TimescaleDB at %s", _DB_DSN)
     
     conn = psycopg2.connect(_DB_DSN)
@@ -44,9 +44,10 @@ def load_from_timescaledb() -> pl.DataFrame:
         d.route_id, 
         d.hour, 
         d.volume, 
-        COALESCE(di.delay_index, 0.0) as delay_index
+        COALESCE(c.travel_time_var, 0.0) as travel_time_var,
+        COALESCE(c.sample_count, 0) as sample_count
     FROM demand d
-    LEFT JOIN delay_index di ON d.route_id = di.zone_id AND d.hour = di.hour
+    LEFT JOIN congestion c ON d.route_id = c.zone_id AND d.hour = c.hour
     ORDER BY d.route_id, d.hour
     """
     

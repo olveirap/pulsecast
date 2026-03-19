@@ -2,7 +2,7 @@
 tests/test_cache.py – Unit tests for the serving cache layer.
 
 Covers:
-  - pulsecast.serving.cache._bucket_delay edge cases
+  - pulsecast.serving.cache._bucket_congestion edge cases
   - pulsecast.serving.cache._make_key structure
   - pulsecast.serving.cache.ForecastCache get/set behaviour (Redis mocked)
 """
@@ -14,48 +14,50 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pulsecast.serving.cache import ForecastCache, _bucket_delay, _make_key
+from pulsecast.serving.cache import ForecastCache, _bucket_congestion, _make_key
 
 # ---------------------------------------------------------------------------
-# _bucket_delay
+# _bucket_congestion
 # ---------------------------------------------------------------------------
 
 
-class TestBucketDelay:
+class TestBucketCongestion:
     def test_exact_multiple(self):
-        assert _bucket_delay(1.0) == pytest.approx(1.0)
-        assert _bucket_delay(1.5) == pytest.approx(1.5)
-        assert _bucket_delay(2.0) == pytest.approx(2.0)
+        assert _bucket_congestion(10.0) == pytest.approx(10.0)
+        assert _bucket_congestion(20.0) == pytest.approx(20.0)
+        assert _bucket_congestion(0.0) == pytest.approx(0.0)
 
-    def test_rounds_to_nearest_half(self):
-        assert _bucket_delay(1.24) == pytest.approx(1.0)
-        assert _bucket_delay(1.26) == pytest.approx(1.5)
-        assert _bucket_delay(1.75) == pytest.approx(2.0)
-        assert _bucket_delay(1.74) == pytest.approx(1.5)
+    def test_rounds_to_nearest_ten(self):
+        # Default bucket size is 10.0
+        assert _bucket_congestion(14.0) == pytest.approx(10.0)
+        assert _bucket_congestion(16.0) == pytest.approx(20.0)
+        # 25.0 / 10.0 = 2.5. round(2.5) is 2 (round half to even).
+        assert _bucket_congestion(25.0) == pytest.approx(20.0)
+        # 35.0 / 10.0 = 3.5. round(3.5) is 4.
+        assert _bucket_congestion(35.0) == pytest.approx(40.0)
+        assert _bucket_congestion(24.9) == pytest.approx(20.0)
 
     def test_zero(self):
-        assert _bucket_delay(0.0) == pytest.approx(0.0)
+        assert _bucket_congestion(0.0) == pytest.approx(0.0)
 
     def test_negative_value(self):
-        # Negative delay indices should still bucket correctly.
-        assert _bucket_delay(-0.3) == pytest.approx(-0.5)
-        assert _bucket_delay(-0.1) == pytest.approx(0.0)
+        assert _bucket_congestion(-3.0) == pytest.approx(0.0)
+        assert _bucket_congestion(-7.0) == pytest.approx(-10.0)
 
     def test_large_value(self):
-        assert _bucket_delay(99.9) == pytest.approx(100.0)
+        assert _bucket_congestion(999.0) == pytest.approx(1000.0)
 
     def test_custom_bucket_size(self):
-        assert _bucket_delay(1.0, bucket_size=1.0) == pytest.approx(1.0)
-        assert _bucket_delay(1.4, bucket_size=1.0) == pytest.approx(1.0)
-        assert _bucket_delay(1.6, bucket_size=1.0) == pytest.approx(2.0)
+        assert _bucket_congestion(1.0, bucket_size=1.0) == pytest.approx(1.0)
+        assert _bucket_congestion(1.4, bucket_size=1.0) == pytest.approx(1.0)
+        assert _bucket_congestion(1.6, bucket_size=1.0) == pytest.approx(2.0)
 
     def test_returns_float(self):
-        result = _bucket_delay(1.3)
+        result = _bucket_congestion(13.0)
         assert isinstance(result, float)
 
     def test_precision_capped_at_6_decimals(self):
-        # _bucket_delay rounds to 6 decimal places; result must equal itself rounded.
-        result = _bucket_delay(0.1)
+        result = _bucket_congestion(10.1)
         assert result == round(result, 6)
 
 
@@ -65,23 +67,23 @@ class TestBucketDelay:
 
 
 def test_make_key_format():
-    key = _make_key(132, 3, 1.3)
-    # 1.3 bucketed to nearest 0.5 → 1.5
-    assert key == "forecast:132:3:1.5"
+    key = _make_key(132, 3, 13.0)
+    # 13.0 bucketed to nearest 10.0 → 10.0
+    assert key == "forecast:132:3:10.0"
 
 
-def test_make_key_uses_bucketed_delay():
-    # Two delay indices that bucket to the same 0.5-multiple must produce
-    # identical cache keys.  0.1 and 0.2 both round to 0.0.
-    assert _make_key(1, 1, 0.1) == _make_key(1, 1, 0.2)
+def test_make_key_uses_bucketed_congestion():
+    # Two values that bucket to the same 10.0-multiple must produce
+    # identical cache keys. 1.0 and 2.0 both round to 0.0.
+    assert _make_key(1, 1, 1.0) == _make_key(1, 1, 2.0)
 
 
 def test_make_key_different_routes_differ():
-    assert _make_key(1, 1, 1.0) != _make_key(2, 1, 1.0)
+    assert _make_key(1, 1, 10.0) != _make_key(2, 1, 10.0)
 
 
 def test_make_key_different_horizons_differ():
-    assert _make_key(1, 1, 1.0) != _make_key(1, 2, 1.0)
+    assert _make_key(1, 1, 10.0) != _make_key(1, 2, 10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +92,7 @@ def test_make_key_different_horizons_differ():
 
 
 def _make_cache(redis_client_mock: MagicMock) -> ForecastCache:
-    """Return a ForecastCache whose internal Redis client is the given mock.
-
-    ``redis`` is imported lazily inside ``__init__``, so we patch it via
-    ``sys.modules`` rather than ``patch("pulsecast.serving.cache.redis")``.
-    """
+    """Return a ForecastCache whose internal Redis client is the given mock."""
     import importlib
     import sys
 
@@ -127,9 +125,9 @@ class TestForecastCacheGet:
         redis_mock = MagicMock()
         redis_mock.get.return_value = None
         cache = _make_cache(redis_mock)
-        cache.get(1, 2, 1.3)
-        # delay 1.3 buckets to 1.5
-        redis_mock.get.assert_called_once_with("forecast:1:2:1.5")
+        cache.get(1, 2, 13.0)
+        # 13.0 buckets to 10.0
+        redis_mock.get.assert_called_once_with("forecast:1:2:10.0")
 
 
 class TestForecastCacheSet:
@@ -137,10 +135,11 @@ class TestForecastCacheSet:
         redis_mock = MagicMock()
         cache = _make_cache(redis_mock)
         payload = {"p10": [10.0], "p50": [20.0], "p90": [30.0]}
-        cache.set(5, 3, 0.5, payload)
+        # 5.0 / 10.0 = 0.5. round(0.5) is 0.
+        cache.set(5, 3, 5.0, payload)
         redis_mock.set.assert_called_once()
         args, kwargs = redis_mock.set.call_args
-        assert args[0] == "forecast:5:3:0.5"
+        assert args[0] == "forecast:5:3:0.0"
         assert json.loads(args[1]) == payload
         assert kwargs.get("ex") == 60
 
@@ -159,6 +158,6 @@ class TestForecastCacheSet:
 
         cache = _make_cache(redis_mock)
         payload = {"p10": [5.0], "p50": [10.0], "p90": [15.0]}
-        cache.set(1, 1, 1.0, payload)
-        result = cache.get(1, 1, 1.0)
+        cache.set(1, 1, 10.0, payload)
+        result = cache.get(1, 1, 10.0)
         assert result == payload
