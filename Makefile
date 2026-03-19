@@ -1,4 +1,4 @@
-.PHONY: ingest backfill build-stop-zone-map features train export serve test install-geo
+.PHONY: ingest backfill build-stop-zone-map features train export serve test
 
 # ── Configuration ────────────────────────────────────────────────────────────
 PYTHON   ?= python
@@ -19,11 +19,7 @@ backfill:
 		--end   $(BACKFILL_END)
 
 build-stop-zone-map:
-	@echo "Requires optional geospatial deps. Run 'make install-geo' first in a clean environment."
 	$(PYTHON) scripts/build_stop_zone_map.py
-
-install-geo:
-	$(PYTHON) -m pip install ".[geo]"
 
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:
