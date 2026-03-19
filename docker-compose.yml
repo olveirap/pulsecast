@@ -64,23 +64,45 @@ services:
       start_period: 30s
 
   # ─────────────────────────────────────────────────────────────────────────
-  # GTFS-RT poller – streams MTA delay_index into TimescaleDB
+  # Subway RT poller – streams MTA mean_delay into TimescaleDB
   # ─────────────────────────────────────────────────────────────────────────
-  gtfs-poller:
+  subway-poller:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: python -m pulsecast.data.ingest.gtfs_rt
+    command: python -m pulsecast.data.ingest.subway_rt
     environment:
-      MTA_FEED_URL: ${MTA_FEED_URL:-https://api.mta.info/GTFS}
       MTA_API_KEY: ${MTA_API_KEY:-}
+      SUBWAY_FEED_IDS: ${SUBWAY_FEED_IDS:-GTR,ACE,BDFM,G,JZ,NQRW,L,SIR}
+      MTA_FEED_URL_PATTERN: ${MTA_FEED_URL_PATTERN:-https://api.mta.info/GTFS/{feed_id}}
       TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
     depends_on:
       timescaledb:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f gtfs_rt || exit 1"]
+      test: ["CMD-SHELL", "pgrep -f subway_rt || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Bus Positions poller – streams travel_time_var into TimescaleDB
+  # ─────────────────────────────────────────────────────────────────────────
+  bus-poller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: python -m pulsecast.data.ingest.bus_positions
+    environment:
+      BUS_POSITIONS_BUCKET: ${BUS_POSITIONS_BUCKET:-nycbuspositions}
+      TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f bus_positions || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -102,7 +124,7 @@ services:
       TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
       REDIS_URL: redis://redis:6379/0
       ONNX_DIR: /app/models/onnx
-      N_FEATURES: "42"
+      N_FEATURES: "43"
     volumes:
       - onnx_models:/app/models/onnx:ro
     ports:
