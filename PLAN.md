@@ -5,11 +5,11 @@
 ## Build Plan
 
 **Data sources:** NYC TLC Trip Records (demand backbone) + MTA GTFS-Realtime (congestion covariate)
-**Timeline:** ~7 weeks | 5 phases | zero synthetic data
+**Timeline:**  5 phases, each with a clear deliverable and success criteria
 
 ---
 
-### Phase 0 — Data ingestion: TLC + GTFS-RT (~5 days)
+### Phase 0 — Data ingestion: TLC + GTFS-RT
 
 - Download 24 months of Yellow + Green taxi Parquet files from `nyc.gov/tlc` (~8GB); filter to `pickup_datetime`, `PULocationID`, `trip_distance`, `fare_amount` — **duckdb, pandas**
 - Aggregate to route-level demand: define 20 logical routes from TLC zone pairs (e.g. JFK→Midtown, BK→Manhattan) mirroring a courier network topology — **geopandas, TLC zone shapefile**
@@ -22,7 +22,7 @@
 
 ---
 
-### Phase 1 — Feature engineering pipeline (~4 days)
+### Phase 1 — Feature engineering pipeline
 
 - Demand lags from TLC: `volume(t-1…t-7)`, rolling mean 7d/14d, EWM trend, yoy ratio (`volume_t / volume_{t-52w}`) — **polars**
 - Calendar features: dow, hour_of_day, week_of_year, days_to_next_US_holiday, `is_nyc_event` flag (scraped from NYC Open Data events calendar) — **holidays, nyc open data api**
@@ -33,7 +33,7 @@
 
 ---
 
-### Phase 2 — Modeling layer: baselines → TFT (~8 days)
+### Phase 2 — Modeling layer: baselines → TFT 
 
 - Baseline: MSTL + AutoARIMA per route via `statsforecast`; establishes the floor and quantifies how much the GTFS-RT covariate actually helps — **statsforecast**
 - LightGBM quantile regression (q=0.1/0.5/0.9): train twice — with and without `delay_index` — to produce a covariate ablation table — **lightgbm, sktime, optuna**
@@ -44,7 +44,7 @@
 
 ---
 
-### Phase 3 — Serving layer: ONNX + FastAPI (~5 days)
+### Phase 3 — Serving layer: ONNX + FastAPI
 
 - Export LightGBM to ONNX; validate numerical parity; benchmark CPU latency with ONNX Runtime vs native — **onnxruntime, onnxmltools**
 - FastAPI: `POST /forecast` — accepts `route_id` + `horizon`, fetches live `delay_index` from GTFS-RT poller, returns P10/P50/P90 + `X-Latency-Ms` header — **fastapi, pydantic v2**
@@ -55,7 +55,7 @@
 
 ---
 
-### Phase 4 — Demo UI + portfolio packaging (~5 days)
+### Phase 4 — Demo UI + portfolio packaging
 
 - Streamlit dashboard: route selector, 7-day fan chart (P10/P50/P90 band), actual vs forecast overlay, live `delay_index` badge, latency indicator — **streamlit, plotly**
 - Ablation panel: side-by-side pinball loss bars for the four model variants — key visual for interviewers — **plotly**

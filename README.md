@@ -69,7 +69,7 @@ pulsecast/
 │   └── app.py                    # Streamlit fan chart + ablation panel
 ├── docker-compose.yml            # api, gtfs-poller, redis, timescaledb, mlflow
 ├── Makefile                      # ingest / backfill / features / train / export / serve / test
-├── pyproject.toml                # Python ≥3.11 dependencies
+├── pyproject.toml                # Python ≥3.12 dependencies
 ├── ARCHITECTURE.md               # Data flow and component responsibilities
 ├── DECISIONS.md                  # ADRs: Bus variance covariate, ONNX, cache
 ├── RESULTS.md                    # Ablation table (placeholder)
@@ -84,7 +84,7 @@ pulsecast/
 ### Prerequisites
 
 - Docker ≥ 24 and Docker Compose ≥ 2.20
-- Python ≥ 3.11 (for local development)
+- Python ≥ 3.12 (for local development)
 - An MTA API key (free — register at <https://api.mta.info/>)
 
 ### 1. Clone and configure
