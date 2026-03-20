@@ -71,8 +71,10 @@ def download_parquet(
     return dest
 
 
-def load_and_filter(path: Path, color: str) -> pl.DataFrame:
-    """Read a Parquet file, rename columns, and keep only the four target columns."""
+def load_and_filter(path: Path, color: str, year: int, month: int) -> pl.DataFrame:
+    """Read a Parquet file, rename columns, and keep only the four target columns.
+    Filters to only include rows within the specified year and month.
+    """
     df = pl.read_parquet(path)
     aliases = _COL_ALIASES.get(color, {})
     rename_map = {k: v for k, v in aliases.items() if k in df.columns}
@@ -85,11 +87,18 @@ def load_and_filter(path: Path, color: str) -> pl.DataFrame:
         df = df.with_columns(
             pl.col("pickup_datetime").cast(pl.Datetime("us"))
         )
+        # Filter to target year and month to avoid outliers
+        df = df.filter(
+            (pl.col("pickup_datetime").dt.year() == year) &
+            (pl.col("pickup_datetime").dt.month() == month)
+        )
     return df
 
 
 def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
     """Aggregate to hourly pickup counts per TLC zone_id."""
+    if df.is_empty():
+        return pl.DataFrame(schema={"zone_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32})
     df = df.with_columns(
         pl.col("pickup_datetime").dt.truncate("1h").alias("hour"),
         pl.col("PULocationID").cast(pl.Int64).alias("zone_id"),
@@ -162,7 +171,7 @@ def ingest(
             if path is None:
                 continue
             try:
-                df = load_and_filter(path, color)
+                df = load_and_filter(path, color, year, month)
                 hourly = aggregate_hourly(df)
                 frames.append(hourly)
             except Exception:
