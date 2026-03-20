@@ -1,4 +1,5 @@
 import os
+
 import psycopg2
 from dotenv import load_dotenv
 
@@ -9,7 +10,7 @@ def apply_schema():
     try:
         with psycopg2.connect(dsn) as conn:
             with conn.cursor() as cur:
-                with open("pulsecast/data/schema.sql", "r") as f:
+                with open("pulsecast/data/schema.sql") as f:
                     schema_sql = f.read()
                 cur.execute(schema_sql)
                 print("Schema applied successfully.")

@@ -4,7 +4,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
-import pandas as pd
 import pytest
 import requests
 from shapely.geometry import Polygon
@@ -19,7 +18,6 @@ def load_taxi_zones_logic(url: str) -> gpd.GeoDataFrame:
     resp.raise_for_status()
     
     # Use mkstemp to get a path that we can close before geopandas opens it
-    import tempfile
     fd, path = tempfile.mkstemp(suffix=".zip")
     tmp_path = Path(path)
     try:

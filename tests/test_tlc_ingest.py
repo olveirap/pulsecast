@@ -223,7 +223,10 @@ def test_ingest_returns_nonempty_dataframe(tmp_path: Path):
         p.write_bytes(parquet_bytes)
         return p
 
-    with patch("pulsecast.data.ingest.tlc.download_parquet", side_effect=_fake_download):
+    with (
+        patch("pulsecast.data.ingest.tlc.download_parquet", side_effect=_fake_download),
+        patch("pulsecast.data.ingest.tlc._month_range", return_value=[(2024, 3)]),
+    ):
         # Pass dsn=None to avoid a real DB connection if TIMESCALE_DSN is set in the environment.
         result = ingest(dest_dir=tmp_path, months=1, colors=("yellow",), dsn=None)
 
@@ -242,6 +245,7 @@ def test_ingest_calls_write_to_db_when_dsn_provided(tmp_path: Path):
 
     with (
         patch("pulsecast.data.ingest.tlc.download_parquet", side_effect=_fake_download),
+        patch("pulsecast.data.ingest.tlc._month_range", return_value=[(2024, 3)]),
         patch("pulsecast.data.ingest.tlc.write_to_db", return_value=2) as mock_write,
     ):
         ingest(dest_dir=tmp_path, months=1, colors=("yellow",), dsn="postgresql://x/y")
@@ -262,6 +266,7 @@ def test_ingest_does_not_call_write_to_db_without_dsn(tmp_path: Path):
 
     with (
         patch("pulsecast.data.ingest.tlc.download_parquet", side_effect=_fake_download),
+        patch("pulsecast.data.ingest.tlc._month_range", return_value=[(2024, 3)]),
         patch("pulsecast.data.ingest.tlc.write_to_db") as mock_write,
     ):
         ingest(dest_dir=tmp_path, months=1, colors=("yellow",), dsn=None)
@@ -280,6 +285,7 @@ def test_ingest_row_count_greater_than_zero(tmp_path: Path):
 
     with (
         patch("pulsecast.data.ingest.tlc.download_parquet", side_effect=_fake_download),
+        patch("pulsecast.data.ingest.tlc._month_range", return_value=[(2024, 3)]),
         patch("pulsecast.data.ingest.tlc.write_to_db", return_value=2) as mock_write,
     ):
         result = ingest(

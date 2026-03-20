@@ -1,10 +1,11 @@
-import os
 import logging
-import psycopg2
-import pandas as pd
+import os
+from pathlib import Path
+
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from pathlib import Path
+import pandas as pd
+import psycopg2
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO)
