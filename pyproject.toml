@@ -96,3 +96,9 @@ strict = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "kaleido (>=1.2.0,<2.0.0)",
+    "plotly (>=6.6.0,<7.0.0)"
+]
