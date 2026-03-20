@@ -210,3 +210,6 @@ __marimo__/
 data/
 models/
 .logs/
+
+.gemini/
+gha-creds-*.json
