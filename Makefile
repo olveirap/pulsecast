@@ -5,8 +5,12 @@ PYTHON   ?= python
 POETRY   ?= poetry
 MONTHS   ?= 24
 HORIZON  ?= 7
-BACKFILL_START ?= 2024-09-21
-BACKFILL_END   ?= 2026-03-21
+# Dynamic backfill dates: defaults to 180 days ago until today
+# Override with BACKFILL_START and BACKFILL_END environment variables for testing
+TODAY        := $(shell date +%Y-%m-%d)
+BACKFILL_DAYS := 180
+BACKFILL_START ?= $(shell date -d "$(TODAY) - $(BACKFILL_DAYS) days" +%Y-%m-%d)
+BACKFILL_END   ?= $(TODAY)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest: ingest-tlc ingest-subway ingest-bus
