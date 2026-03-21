@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime
+from functools import lru_cache
 
 import polars as pl
+
+from pulsecast.data.ingest.nyc_events import fetch_nyc_events
 
 try:
     from holidays import country_holidays  # holidays >= 0.25
@@ -38,6 +41,22 @@ _NYC_EVENTS: frozenset[tuple[int, int]] = frozenset(
         (12, 31), # New Year's Eve
     }
 )
+
+
+@lru_cache(maxsize=1)
+def get_nyc_event_dates() -> set[date]:
+    """Fetch NYC events from the API with a fallback to the hardcoded list.
+    We use lru_cache to ensure we only call the API once per session.
+    """
+    # fetch_nyc_events returns empty set if it fails.
+    return fetch_nyc_events()
+
+
+def _is_nyc_event(d: date) -> bool:
+    """Return True if date *d* is in the NYC event list (API or hardcoded)."""
+    if (d.month, d.day) in _NYC_EVENTS:
+        return True
+    return d in get_nyc_event_dates()
 
 
 def _us_holidays_for_year(year: int) -> set[date]:
@@ -77,7 +96,7 @@ def scalar_calendar_features(dt: datetime) -> dict[str, float]:
         "week_of_year": float(week),
         "is_weekend": float(int(dow >= 5)),
         "days_to_next_us_holiday": float(_days_to_next_holiday(d)),
-        "nyc_event_flag": float(int((d.month, d.day) in _NYC_EVENTS)),
+        "nyc_event_flag": float(int(_is_nyc_event(d))),
         "hour_sin": math.sin(2 * math.pi * h / 24),
         "hour_cos": math.cos(2 * math.pi * h / 24),
         "dow_sin": math.sin(2 * math.pi * dow / 7),
@@ -116,7 +135,7 @@ def build_calendar_features(df: pl.DataFrame) -> pl.DataFrame:
     )
     days_to_holiday = [_days_to_next_holiday(d) for d in dates_col]
     nyc_event = [
-        int((d.month, d.day) in _NYC_EVENTS) for d in dates_col
+        int(_is_nyc_event(d)) for d in dates_col
     ]
 
     df = df.with_columns(
