@@ -19,7 +19,6 @@ flowchart LR
     Bus["NYC Bus Positions\n(S3 Archive)"]
     Subway["MTA Subway GTFS-RT\n(api.mta.info)"]
     TSDB[("TimescaleDB")]
-    FS["Feature Store\n(Feast)"]
     LGBM["LightGBM\nQuantile Reg."]
     TFT["Temporal Fusion\nTransformer"]
     ONNX["ONNX Runtime"]
@@ -30,9 +29,8 @@ flowchart LR
     TLC -->|hourly pickups| TSDB
     Bus -->|travel_time_var| TSDB
     Subway -->|mean_delay| TSDB
-    TSDB --> FS
-    FS --> LGBM
-    FS --> TFT
+    TSDB --> LGBM
+    TSDB --> TFT
     LGBM -->|export| ONNX
     ONNX --> API
     API <-->|cache lookup| Redis

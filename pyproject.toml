@@ -28,7 +28,6 @@ dependencies = [
   "boto3>=1.34.0",
 
   # Feature store
-  "feast>=0.38.0",
 
   # Models
   "lightgbm>=4.3.0",
