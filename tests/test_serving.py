@@ -14,6 +14,8 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from pulsecast.serving.features import build_feature_matrix, N_FEATURES
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -31,89 +33,78 @@ def _make_mock_session(n_rows: int) -> MagicMock:
     return sess
 
 # ---------------------------------------------------------------------------
-# _build_feature_matrix
+# build_feature_matrix
 # ---------------------------------------------------------------------------
 
 def test_build_feature_matrix_shape():
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=10, horizon_hours=24, origin_var=0.5, dest_var=0.6,
         origin_sample_count=15, dest_sample_count=15,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
-    assert mat.shape == (24, m._N_FEATURES)
+    assert mat.shape == (24, N_FEATURES)
     assert mat.dtype == np.float32
 
 def test_build_feature_matrix_route_id_column():
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=42, horizon_hours=5, origin_var=0.0, dest_var=0.0,
         origin_sample_count=15, dest_sample_count=15,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     assert np.all(mat[:, 0] == 42.0)
 
 def test_build_feature_matrix_horizon_steps():
     """Column 1 must be the per-step horizon (1 … horizon_hours)."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
     horizon_hours = 6
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=1, horizon_hours=horizon_hours, origin_var=0.0, dest_var=0.0,
         origin_sample_count=15, dest_sample_count=15,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     expected = np.arange(1, horizon_hours + 1, dtype=np.float32)
     np.testing.assert_array_equal(mat[:, 1], expected)
 
 def test_build_feature_matrix_delay_index_column():
     """Column 2 and 38 store travel_time_var (origin and dest)."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=1, horizon_hours=4, origin_var=3.7, dest_var=4.2,
         origin_sample_count=15, dest_sample_count=15,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     np.testing.assert_allclose(mat[:, 2], 3.7)
     np.testing.assert_allclose(mat[:, 38], 4.2)
 
 def test_build_feature_matrix_7day_rows():
     """A 7-day horizon must yield exactly 168 rows."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=1, horizon_hours=168, origin_var=0.0, dest_var=0.0,
         origin_sample_count=15, dest_sample_count=15,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     assert mat.shape[0] == 168
 
 def test_build_feature_matrix_low_confidence_flag():
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
-        import pulsecast.serving.main as m
-
     # sample_count < 10 should set index 43 (origin) and 48 (dest) to 1.0
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=1, horizon_hours=1, origin_var=0.0, dest_var=0.0,
         origin_sample_count=5, dest_sample_count=5,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     assert mat[0, 43] == 1.0
     assert mat[0, 48] == 1.0
 
     # sample_count >= 10 should set index 43 and 48 to 0.0
-    mat = m._build_feature_matrix(
+    mat = build_feature_matrix(
         route_id=1, horizon_hours=1, origin_var=0.0, dest_var=0.0,
         origin_sample_count=10, dest_sample_count=10,
-        demand_history=np.zeros(168), origin_history=np.zeros(168), dest_history=np.zeros(168)
+        demand_history=np.zeros(168), duration_history=np.zeros(168),
+        origin_history=np.zeros(168), dest_history=np.zeros(168)
     )
     assert mat[0, 43] == 0.0
     assert mat[0, 48] == 0.0
@@ -124,11 +115,11 @@ def test_build_feature_matrix_low_confidence_flag():
 
 def test_run_onnx_calls_each_session_once():
     """_run_onnx must call each quantile session exactly once."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+    with patch.dict(os.environ, {"N_FEATURES": "54"}):
         import pulsecast.serving.main as m
 
     horizon_hours = 168
-    features = np.zeros((horizon_hours, m._N_FEATURES), dtype=np.float32)
+    features = np.zeros((horizon_hours, N_FEATURES), dtype=np.float32)
 
     mock_sessions = {
         "p10": _make_mock_session(horizon_hours),
@@ -151,10 +142,10 @@ def test_run_onnx_raises_when_no_sessions():
     """_run_onnx must raise HTTP 503 when _sessions is empty."""
     from fastapi import HTTPException
 
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+    with patch.dict(os.environ, {"N_FEATURES": "54"}):
         import pulsecast.serving.main as m
 
-    features = np.zeros((24, m._N_FEATURES), dtype=np.float32)
+    features = np.zeros((24, N_FEATURES), dtype=np.float32)
     with patch.object(m, "_sessions", {}):
         with pytest.raises(HTTPException) as exc_info:
             m._run_onnx(features)
@@ -166,7 +157,7 @@ def test_run_onnx_raises_when_no_sessions():
 
 def test_forecast_7day_makes_exactly_3_onnx_calls():
     """A 7-day forecast must result in exactly 3 ONNX session.run calls."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+    with patch.dict(os.environ, {"N_FEATURES": "54"}):
         import pulsecast.serving.main as m
 
     horizon_hours = 7 * 24  # 168
@@ -179,10 +170,10 @@ def test_forecast_7day_makes_exactly_3_onnx_calls():
     empty = np.empty(0, dtype=np.float32)
     with (
         patch.object(m, "_sessions", mock_sessions),
-        patch.object(m, "_fetch_bus_congestion", return_value=(0.0, 15)),
-        patch.object(m, "_fetch_subway_delay", return_value=0.0),
-        patch.object(m, "_fetch_demand_history", return_value=empty),
-        patch.object(m, "_fetch_congestion_history", return_value=empty),
+        patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.0, 15)),
+        patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.0),
+        patch("pulsecast.serving.main.fetch_demand_history", return_value=(empty, empty)),
+        patch("pulsecast.serving.main.fetch_congestion_history", return_value=empty),
         patch.object(m._cache, "get", return_value=None),
         patch.object(m._cache, "set"),
         patch.object(m, "_ROUTES_MAP", {1: (10, 20)}),
@@ -196,7 +187,7 @@ def test_forecast_7day_makes_exactly_3_onnx_calls():
 
 def test_forecast_response_length_matches_horizon():
     """Response lists must have length == horizon * 24."""
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+    with patch.dict(os.environ, {"N_FEATURES": "54"}):
         import pulsecast.serving.main as m
 
     for horizon in (1, 3, 7):
@@ -210,10 +201,10 @@ def test_forecast_response_length_matches_horizon():
         empty = np.empty(0, dtype=np.float32)
         with (
             patch.object(m, "_sessions", mock_sessions),
-            patch.object(m, "_fetch_bus_congestion", return_value=(0.0, 15)),
-            patch.object(m, "_fetch_subway_delay", return_value=0.0),
-            patch.object(m, "_fetch_demand_history", return_value=empty),
-            patch.object(m, "_fetch_congestion_history", return_value=empty),
+            patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.0, 15)),
+            patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.0),
+            patch("pulsecast.serving.main.fetch_demand_history", return_value=(empty, empty)),
+            patch("pulsecast.serving.main.fetch_congestion_history", return_value=empty),
             patch.object(m._cache, "get", return_value=None),
             patch.object(m._cache, "set"),
             patch.object(m, "_ROUTES_MAP", {1: (10, 20)}),
@@ -226,3 +217,4 @@ def test_forecast_response_length_matches_horizon():
         assert len(body["p10"]) == horizon_hours
         assert len(body["p50"]) == horizon_hours
         assert len(body["p90"]) == horizon_hours
+

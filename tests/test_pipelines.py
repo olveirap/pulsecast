@@ -64,7 +64,8 @@ def test_run_features(mock_read_db, mock_connect):
         "route_id": [132, 132],
         "hour": [datetime(2024, 1, 1, 0), datetime(2024, 1, 1, 1)],
         "volume": [10, 20],
-    }, schema={"route_id": pl.Int32, "hour": pl.Datetime, "volume": pl.Int32})
+        "avg_duration": [300.0, 310.0],
+    }, schema={"route_id": pl.Int32, "hour": pl.Datetime, "volume": pl.Int32, "avg_duration": pl.Float64})
 
     # Mock DB data for routes
     mock_df_routes = pl.DataFrame({
@@ -137,8 +138,10 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             "route_id": [132] * n_rows,
             "hour": pl.datetime_range(start_dt, end_dt, "1h", eager=True),
             "volume": rng.integers(0, 100, n_rows),
+            "avg_duration": rng.uniform(100, 500, n_rows),
             "origin_travel_time_var": rng.uniform(0, 1, n_rows),
-            "dest_travel_time_var": rng.uniform(0, 1, n_rows),            "hour_of_day": [i % 24 for i in range(n_rows)],
+            "dest_travel_time_var": rng.uniform(0, 1, n_rows),
+            "hour_of_day": [i % 24 for i in range(n_rows)],
             "dow": [(i // 24) % 7 for i in range(n_rows)],
             "month": [1] * n_rows,
             "week_of_year": [1] * n_rows,
@@ -161,6 +164,11 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             "dest_delay_index_lag1": rng.uniform(0, 1, n_rows),
             "dest_delay_index_rolling3h": rng.uniform(0, 1, n_rows),
             "dest_disruption_flag": [0] * n_rows,
+            "duration_lag_1h": rng.uniform(100, 500, n_rows),
+            "duration_lag_24h": rng.uniform(100, 500, n_rows),
+            "duration_lag_168h": rng.uniform(100, 500, n_rows),
+            "duration_rolling_mean_3h": rng.uniform(100, 500, n_rows),
+            "duration_rolling_mean_24h": rng.uniform(100, 500, n_rows),
         })
         missing = sorted(set(LGBM_FEATURES) - set(df.columns))
         assert not missing, f"Synthetic training data missing required columns: {missing}"
@@ -203,6 +211,7 @@ def test_prepare_data_drops_split_boundary_hour():
         "route_id": routes,
         "hour": hours,
         "volume": [10.0] * n_rows,
+        "avg_duration": [300.0] * n_rows,
         "origin_travel_time_var": [0.1] * n_rows,
         "dest_travel_time_var": [0.1] * n_rows,
         "hour_of_day": [h.hour for h in hours],
@@ -228,6 +237,11 @@ def test_prepare_data_drops_split_boundary_hour():
         "dest_delay_index_lag1": [0.1] * n_rows,
         "dest_delay_index_rolling3h": [0.1] * n_rows,
         "dest_disruption_flag": [0] * n_rows,
+        "duration_lag_1h": [300.0] * n_rows,
+        "duration_lag_24h": [300.0] * n_rows,
+        "duration_lag_168h": [300.0] * n_rows,
+        "duration_rolling_mean_3h": [300.0] * n_rows,
+        "duration_rolling_mean_24h": [300.0] * n_rows,
     })
 
     _, _, _, _, train_df, val_df = prepare_data(df)

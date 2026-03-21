@@ -27,7 +27,7 @@ from pulsecast.data.ingest.tlc import (
 _HOUR = datetime(2024, 3, 7, 14, 0, 0)
 
 
-def _make_hourly_df(rows: list[tuple[int, int, datetime, int]]) -> pl.DataFrame:
+def _make_hourly_df(rows: list[tuple[int, int, datetime, int, float]]) -> pl.DataFrame:
     """Build a small aggregated DataFrame with the schema produced by aggregate_hourly."""
     return pl.DataFrame(
         {
@@ -35,12 +35,14 @@ def _make_hourly_df(rows: list[tuple[int, int, datetime, int]]) -> pl.DataFrame:
             "DOLocationID": [r[1] for r in rows],
             "hour": [r[2] for r in rows],
             "pickup_count": [r[3] for r in rows],
+            "avg_duration": [r[4] for r in rows],
         },
         schema={
             "PULocationID": pl.Int64,
             "DOLocationID": pl.Int64,
             "hour": pl.Datetime("us"),
             "pickup_count": pl.UInt32,
+            "avg_duration": pl.Float64,
         },
     )
 
@@ -78,10 +80,16 @@ def test_aggregate_hourly_counts_per_zone_and_hour():
                 datetime(2024, 3, 7, 15, 10),
                 datetime(2024, 3, 7, 14, 20),
             ],
+            "dropoff_datetime": [
+                datetime(2024, 3, 7, 14, 15), # 10 min
+                datetime(2024, 3, 7, 15, 5),  # 20 min
+                datetime(2024, 3, 7, 15, 20), # 10 min
+                datetime(2024, 3, 7, 14, 30), # 10 min
+            ],
             "PULocationID": [1, 1, 1, 2],
             "DOLocationID": [2, 2, 2, 3],
         },
-        schema={"pickup_datetime": pl.Datetime("us"), "PULocationID": pl.Int64, "DOLocationID": pl.Int64},
+        schema={"pickup_datetime": pl.Datetime("us"), "dropoff_datetime": pl.Datetime("us"), "PULocationID": pl.Int64, "DOLocationID": pl.Int64},
     )
     result = aggregate_hourly(raw)
     assert result.shape[0] == 3
@@ -89,19 +97,22 @@ def test_aggregate_hourly_counts_per_zone_and_hour():
         (pl.col("PULocationID") == 1) & (pl.col("DOLocationID") == 2) & (pl.col("hour") == datetime(2024, 3, 7, 14, 0, 0))
     )
     assert row["pickup_count"].item() == 2
+    # mean of 10 min (600s) and 20 min (1200s) = 900s
+    assert row["avg_duration"].item() == pytest.approx(900.0)
 
 
 def test_aggregate_hourly_output_columns():
     raw = pl.DataFrame(
         {
             "pickup_datetime": [datetime(2024, 1, 1, 8, 0)],
+            "dropoff_datetime": [datetime(2024, 1, 1, 8, 10)],
             "PULocationID": [10],
             "DOLocationID": [20],
         },
-        schema={"pickup_datetime": pl.Datetime("us"), "PULocationID": pl.Int64, "DOLocationID": pl.Int64},
+        schema={"pickup_datetime": pl.Datetime("us"), "dropoff_datetime": pl.Datetime("us"), "PULocationID": pl.Int64, "DOLocationID": pl.Int64},
     )
     result = aggregate_hourly(raw)
-    assert set(result.columns) == {"PULocationID", "DOLocationID", "hour", "pickup_count"}
+    assert set(result.columns) == {"PULocationID", "DOLocationID", "hour", "pickup_count", "avg_duration"}
 
 
 # ---------------------------------------------------------------------------
@@ -111,14 +122,14 @@ def test_aggregate_hourly_output_columns():
 
 def test_write_to_db_returns_zero_for_empty_df():
     empty = pl.DataFrame(
-        schema={"PULocationID": pl.Int64, "DOLocationID": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
+        schema={"PULocationID": pl.Int64, "DOLocationID": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32, "avg_duration": pl.Float64}
     )
     result = write_to_db(empty, "postgresql://fake/fake")
     assert result == 0
 
 
 def test_write_to_db_upserts_rows(mock_db_conn):
-    df = _make_hourly_df([(1, 2, _HOUR, 10), (10, 20, _HOUR, 5)])
+    df = _make_hourly_df([(1, 2, _HOUR, 10, 300.0), (10, 20, _HOUR, 5, 400.0)])
 
     with (
         patch("pulsecast.data.ingest.tlc.psycopg2.connect", return_value=mock_db_conn),
@@ -128,14 +139,14 @@ def test_write_to_db_upserts_rows(mock_db_conn):
 
     assert count == 2
     mock_ev.assert_called_once()
-    # Third positional argument to execute_values is the params list.
     params_list = mock_ev.call_args[0][2]
     assert len(params_list) == 2
+    assert params_list[0][3] == 300.0
 
 
 def test_write_to_db_uses_zone_id_as_route_id(mock_db_conn):
     """write_to_db should map PULocationID and DOLocationID to route_id."""
-    df = _make_hourly_df([(1, 2, _HOUR, 3)])
+    df = _make_hourly_df([(1, 2, _HOUR, 3, 300.0)])
 
     with (
         patch("pulsecast.data.ingest.tlc.psycopg2.connect", return_value=mock_db_conn),
@@ -150,7 +161,7 @@ def test_write_to_db_uses_zone_id_as_route_id(mock_db_conn):
 
 def test_write_to_db_preserves_zone_id(mock_db_conn):
     """write_to_db should preserve mapped routes correctly."""
-    df = _make_hourly_df([(42, 42, _HOUR, 7)])
+    df = _make_hourly_df([(42, 42, _HOUR, 7, 300.0)])
 
     with (
         patch("pulsecast.data.ingest.tlc.psycopg2.connect", return_value=mock_db_conn),
@@ -167,7 +178,7 @@ def test_write_to_db_hour_is_utc_aware(mock_db_conn):
     """Hours passed to the DB must carry explicit UTC tzinfo."""
     from datetime import UTC
 
-    df = _make_hourly_df([(1, 2, _HOUR, 5)])
+    df = _make_hourly_df([(1, 2, _HOUR, 5, 300.0)])
 
     with (
         patch("pulsecast.data.ingest.tlc.psycopg2.connect", return_value=mock_db_conn),
@@ -181,7 +192,7 @@ def test_write_to_db_hour_is_utc_aware(mock_db_conn):
 
 def test_write_to_db_always_closes_connection():
     """The DB connection must be closed even when an exception is raised."""
-    df = _make_hourly_df([(1, 2, _HOUR, 1)])
+    df = _make_hourly_df([(1, 2, _HOUR, 1, 300.0)])
 
     mock_conn = MagicMock()
     mock_conn.cursor.side_effect = RuntimeError("boom")
@@ -207,6 +218,7 @@ def _make_parquet_bytes() -> bytes:
     df = pl.DataFrame(
         {
             "tpep_pickup_datetime": [datetime(2024, 3, 7, 14, 5), datetime(2024, 3, 7, 14, 30)],
+            "tpep_dropoff_datetime": [datetime(2024, 3, 7, 14, 15), datetime(2024, 3, 7, 14, 40)],
             "PULocationID": [1, 2],
             "DOLocationID": [2, 3],
             "trip_distance": [1.2, 3.4],
@@ -214,6 +226,7 @@ def _make_parquet_bytes() -> bytes:
         },
         schema={
             "tpep_pickup_datetime": pl.Datetime("us"),
+            "tpep_dropoff_datetime": pl.Datetime("us"),
             "PULocationID": pl.Int64,
             "DOLocationID": pl.Int64,
             "trip_distance": pl.Float64,
@@ -242,7 +255,7 @@ def test_ingest_returns_nonempty_dataframe(tmp_path: Path):
         result = ingest(dest_dir=tmp_path, months=1, colors=("yellow",), dsn=None)
 
     assert result.shape[0] > 0
-    assert set(result.columns) == {"PULocationID", "DOLocationID", "hour", "pickup_count"}
+    assert set(result.columns) == {"PULocationID", "DOLocationID", "hour", "pickup_count", "avg_duration"}
 
 
 def test_ingest_calls_write_to_db_when_dsn_provided(tmp_path: Path):

@@ -108,19 +108,24 @@ def app_client():
         if mod_name.startswith("serving"):
             del sys.modules[mod_name]
 
-    # Force N_FEATURES to 49 for tests to match the expected length of _FEATURE_NAMES
-    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+    # Force N_FEATURES to 54 for tests to match the expected length of _FEATURE_NAMES
+    with patch.dict(os.environ, {"N_FEATURES": "54"}):
         with (
             patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
         ):
             import pulsecast.serving.main as main_mod
 
             importlib.reload(main_mod)
-            
-            with patch.object(main_mod.pg_pool, "ThreadedConnectionPool", new=mock_pool_class):
+
+            with (
+                patch.object(main_mod.pg_pool, "ThreadedConnectionPool", new=mock_pool_class),
+                patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.5, 15)),
+                patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.1),
+                patch("pulsecast.serving.main.fetch_demand_history", return_value=(np.zeros(168, dtype=np.float32), np.zeros(168, dtype=np.float32))),
+                patch("pulsecast.serving.main.fetch_congestion_history", return_value=np.zeros(168, dtype=np.float32)),
+            ):
                 with TestClient(main_mod.app, raise_server_exceptions=False) as client:
                     yield client, main_mod, redis_client
-
 
 # ---------------------------------------------------------------------------
 # Health endpoint
