@@ -27,9 +27,9 @@
 - Demand lags from TLC: `volume(t-1…t-7)`, rolling mean 7d/14d, EWM trend, yoy ratio (`volume_t / volume_{t-52w}`) — **polars**
 - Calendar features: dow, hour_of_day, week_of_year, days_to_next_US_holiday, `is_nyc_event` flag (scraped from NYC Open Data events calendar) — **holidays, nyc open data api**
 - GTFS-RT covariate: lag-1 `delay_index`, rolling 3h `delay_index`, binary `disruption_flag` (`delay_index > 2σ` from route mean) — **polars**
-- Materialize as Parquet snapshots + register in Feast local feature store; version by training cutoff date — **feast (local), parquet**
+- Materialize as Parquet snapshots versioned by training cutoff date — **parquet**
 
-**Deliverable:** Feature store with two source lineages clearly separated: TLC demand features vs GTFS-RT congestion features. Ablation later will show each source's marginal contribution.
+**Deliverable:** Feature engineering pipeline with two source lineages clearly separated: TLC demand features vs GTFS-RT congestion features. Ablation later will show each source's marginal contribution.
 
 ---
 

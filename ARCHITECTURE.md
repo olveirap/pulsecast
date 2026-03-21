@@ -28,7 +28,7 @@ TimescaleDB ◄─────────────────────�
       │◄───────────────────┘
       │
       ▼
-Feature Store (Feast)
+Feature Engineering (Polars)
   ├─ features/demand.py     (lags, rolling, EWM, YoY)
   ├─ features/calendar.py   (dow, hour, holiday, event)
   └─ features/congestion.py (travel_time_var, flags)

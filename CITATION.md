@@ -58,7 +58,6 @@ Key open-source libraries used in this project:
 | pytorch-forecasting | MIT | <https://github.com/jdb78/pytorch-forecasting> |
 | statsforecast | Apache-2.0 | <https://github.com/Nixtla/statsforecast> |
 | fastapi | MIT | <https://fastapi.tiangolo.com/> |
-| feast | Apache-2.0 | <https://feast.dev/> |
 | mlflow | Apache-2.0 | <https://mlflow.org/> |
 | evidently | Apache-2.0 | <https://www.evidentlyai.com/> |
 | gtfs-realtime-bindings | Apache-2.0 | <https://github.com/MobilityData/gtfs-realtime-bindings> |

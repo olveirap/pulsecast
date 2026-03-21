@@ -6,7 +6,7 @@ Pulsecast is a high-performance, probabilistic shipment demand forecasting syste
 
 ### Core Technologies
 - **Languages:** Python 3.12+
-- **Data/Storage:** TimescaleDB (PostgreSQL), Redis (Caching), Polars/Pandas, Feast (Feature Store)
+- **Data/Storage:** TimescaleDB (PostgreSQL), Redis (Caching), Polars/Pandas
 - **ML/Models:** LightGBM (Quantile Regression), Temporal Fusion Transformer (PyTorch Forecasting), ONNX Runtime (Inference)
 - **API/Serving:** FastAPI, Uvicorn, Pydantic v2
 - **Dashboard:** Streamlit, Plotly
