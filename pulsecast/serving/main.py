@@ -315,6 +315,57 @@ def _fetch_congestion_history(zone_id: int, n_hours: int = 168) -> np.ndarray:
         logger.exception("Failed to fetch congestion history from TimescaleDB")
     return np.empty(0, dtype=np.float32)
 
+def _compute_congestion_history_features(
+    history: np.ndarray,
+    sample_count: int,
+    feature_offset: int = 0,
+) -> tuple[float, float, float, float, float]:
+    """
+    Compute five congestion-related features from a history array.
+    
+    Returns a tuple of:
+        (lag1, lag24, rolling_mean_3h, disruption_flag, low_confidence_flag)
+    
+    Parameters
+    ----------
+    history : np.ndarray
+        Congestion history array (oldest-first, index -1 = most recent).
+    sample_count : int
+        Sample count for the latest congestion data point.
+    feature_offset : int
+        Offset for feature indices (0 for origin at indices 39-43,
+        5 for destination at indices 44-48).
+    """
+    n = len(history)
+    
+    # Feature 0: lag1 - most recent travel_time_var
+    lag1 = float(history[-1]) if n >= 1 else 0.0
+    
+    # Feature 1: lag24 - travel_time_var from 24 hours ago
+    lag24 = float(history[-24]) if n >= 24 else 0.0
+    
+    # Feature 2: rolling_mean_3h - mean of last 3 hours (or all available)
+    if n >= 3:
+        rolling_mean_3h = float(np.mean(history[-3:]))
+    elif n > 0:
+        rolling_mean_3h = float(np.mean(history))
+    else:
+        rolling_mean_3h = 0.0
+    
+    # Feature 3: disruption_flag - 1 if lag1 exceeds mean + 2*std of last 168h
+    if n >= 168:
+        m = float(np.mean(history[-168:]))
+        s = float(np.std(history[-168:]))
+        disruption_flag = 1.0 if lag1 > m + 2.0 * s else 0.0
+    else:
+        disruption_flag = 0.0
+    
+    # Feature 4: low_confidence_flag - 1 if sample_count < 10
+    low_confidence_flag = 1.0 if sample_count < 10 else 0.0
+    
+    return (lag1, lag24, rolling_mean_3h, disruption_flag, low_confidence_flag)
+
+
 def _build_static_features(
     route_id: int,
     origin_var: float,
@@ -365,31 +416,15 @@ def _build_static_features(
     # ── Congestion features ───────────────────────────────────────────────
     features[38] = float(dest_var)
 
-    # Origin history features (39-43)
-    n_o = len(origin_history)
-    features[39] = float(origin_history[-1]) if n_o >= 1 else 0.0  # lag1
-    features[40] = float(origin_history[-24]) if n_o >= 24 else 0.0  # lag24
-    if n_o >= 3:
-        features[41] = float(np.mean(origin_history[-3:]))
-    elif n_o > 0:
-        features[41] = float(np.mean(origin_history))
-    if n_o >= 168:
-        m, s = np.mean(origin_history[-168:]), np.std(origin_history[-168:])
-        features[42] = 1.0 if float(origin_history[-1]) > m + 2.0 * s else 0.0
-    features[43] = 1.0 if origin_sample_count < 10 else 0.0
+    # Origin history features (indices 39-43)
+    # Computes: lag1, lag24, rolling_mean_3h, disruption_flag, low_confidence_flag
+    origin_features = _compute_congestion_history_features(origin_history, origin_sample_count, feature_offset=0)
+    features[39:44] = origin_features
 
-    # Destination history features (44-48)
-    n_d = len(dest_history)
-    features[44] = float(dest_history[-1]) if n_d >= 1 else 0.0  # lag1
-    features[45] = float(dest_history[-24]) if n_d >= 24 else 0.0  # lag24
-    if n_d >= 3:
-        features[46] = float(np.mean(dest_history[-3:]))
-    elif n_d > 0:
-        features[46] = float(np.mean(dest_history))
-    if n_d >= 168:
-        m, s = np.mean(dest_history[-168:]), np.std(dest_history[-168:])
-        features[47] = 1.0 if float(dest_history[-1]) > m + 2.0 * s else 0.0
-    features[48] = 1.0 if dest_sample_count < 10 else 0.0
+    # Destination history features (indices 44-48)
+    # Computes: lag1, lag24, rolling_mean_3h, disruption_flag, low_confidence_flag
+    dest_features = _compute_congestion_history_features(dest_history, dest_sample_count, feature_offset=5)
+    features[44:49] = dest_features
 
     return features
 

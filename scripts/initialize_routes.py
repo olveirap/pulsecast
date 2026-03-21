@@ -42,6 +42,8 @@ def main():
         return
 
     frames = []
+    unique_months = set()  # Track unique months for which data was found
+    
     # 1. Scan last 3 months of data
     for year, month in _month_range(3):
         for color in ["yellow", "green"]:
@@ -55,14 +57,29 @@ def main():
                     pl.col("DOLocationID").cast(pl.Int32)
                 ])
                 frames.append(df)
+                # Track the unique month (year, month) tuple
+                unique_months.add((year, month))
 
     if not frames:
         logger.warning("No TLC parquet files found in %s for the last 3 months.", _DATA_DIR)
         return
 
-    # 2. Calculate average monthly volume
+    # 2. Calculate average monthly volume using actual number of months with data
     combined = pl.concat(frames)
-    total_months = 3 # We assume we want avg over 3 months
+    total_months = len(unique_months)  # Dynamic count based on actual data availability
+    
+    # Log warning if fewer than expected months of data are available
+    if total_months < 3:
+        logger.warning(
+            "Only %d month(s) of data found (expected 3). "
+            "Average volume calculation may not be representative.",
+            total_months
+        )
+    
+    # Edge case: if no unique months found (shouldn't happen given the check above, but safe to handle)
+    if total_months == 0:
+        logger.error("No months with data found. Cannot calculate average volume.")
+        return
     
     route_stats = (
         combined.group_by(["PULocationID", "DOLocationID"])
@@ -92,7 +109,6 @@ def main():
                     VALUES %s
                     ON CONFLICT (origin_zone_id, destination_zone_id) DO NOTHING
                 """, params)
-            conn.commit()
             logger.info("Successfully populated routes table.")
     except Exception as e:
         logger.error("Error populating routes table: %s", e)
