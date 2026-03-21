@@ -2,8 +2,8 @@
 demand.py – Feature engineering from hourly TLC pickup counts.
 
 Generates the following features for each (route_id / PULocationID, hour):
-  - lag_1h, lag_2h, lag_3h, lag_24h, lag_48h, lag_72h, lag_96h, lag_120h, lag_144h, lag_168h  (direct lags)
-  - rolling_mean_3h, rolling_mean_24h, rolling_mean_168h, rolling_mean_336h
+  - lag_1h, lag_2h, lag_3h, lag_24h, lag_168h  (direct lags)
+  - rolling_mean_3h, rolling_mean_24h, rolling_mean_168h
   - ewm_trend_24h   (exponentially-weighted mean, span=24)
   - yoy_ratio       (volume / same-hour-last-year, clipped to [0.01, 100])
 """
@@ -48,11 +48,6 @@ def build_demand_features(df: pl.DataFrame) -> pl.DataFrame:
             pl.col("volume").shift(2).over("route_id").alias("lag_2h"),
             pl.col("volume").shift(3).over("route_id").alias("lag_3h"),
             pl.col("volume").shift(24).over("route_id").alias("lag_24h"),
-            pl.col("volume").shift(48).over("route_id").alias("lag_48h"),
-            pl.col("volume").shift(72).over("route_id").alias("lag_72h"),
-            pl.col("volume").shift(96).over("route_id").alias("lag_96h"),
-            pl.col("volume").shift(120).over("route_id").alias("lag_120h"),
-            pl.col("volume").shift(144).over("route_id").alias("lag_144h"),
             pl.col("volume").shift(168).over("route_id").alias("lag_168h"),
             # --- rolling means (excluding current row via shift(1)) ---
             pl.col("volume")
@@ -70,11 +65,6 @@ def build_demand_features(df: pl.DataFrame) -> pl.DataFrame:
             .rolling_mean(window_size=168)
             .over("route_id")
             .alias("rolling_mean_168h"),
-            pl.col("volume")
-            .shift(1)
-            .rolling_mean(window_size=336)
-            .over("route_id")
-            .alias("rolling_mean_336h"),
             # --- exponentially-weighted mean (span=24) ---
             pl.col("volume")
             .shift(1)
