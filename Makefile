@@ -35,6 +35,9 @@ build-zone-maps:
 features:
 	$(POETRY) run python scripts/run_features.py
 
+update-disruption-flag:
+	$(POETRY) run python scripts/update_disruption_flag.py
+
 # ── Model training ────────────────────────────────────────────────────────────
 train:
 	$(POETRY) run python scripts/run_train.py

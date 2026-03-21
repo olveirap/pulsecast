@@ -1,0 +1,86 @@
+"""
+update_disruption_flag.py – Post-processing job to compute and update disruption_flag.
+
+Computes the binary disruption_flag (travel_time_var > µ + 2σ over trailing 168h)
+for all rows in the congestion table and updates the database.
+"""
+
+import logging
+import os
+
+import polars as pl
+import psycopg2
+from dotenv import load_dotenv
+from psycopg2.extras import execute_values
+
+from pulsecast.features.congestion import build_congestion_features
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+_DB_DSN = os.getenv(
+    "TIMESCALE_DSN",
+    "postgresql://pulsecast:pulsecast@localhost:5432/pulsecast",
+)
+
+
+def main():
+    logger.info("Connecting to TimescaleDB to update disruption flags.")
+    try:
+        with psycopg2.connect(_DB_DSN) as conn:
+            # 1. Fetch data for processing
+            # We fetch all rows to ensure rolling windows are correctly computed.
+            query = """
+            SELECT zone_id, hour, travel_time_var, sample_count, disruption_flag
+            FROM congestion
+            ORDER BY zone_id, hour
+            """
+            df = pl.read_database(query, conn)
+
+            if df.is_empty():
+                logger.info("No congestion data found. Skipping update.")
+                return
+
+            # Ensure 'hour' is pl.Datetime
+            df = df.with_columns(pl.col("hour").cast(pl.Datetime))
+
+            # 2. Compute features
+            logger.info("Computing disruption flags for %d rows.", len(df))
+            # Rename existing flag to avoid collision with build_congestion_features output
+            df = df.rename({"disruption_flag": "old_flag"})
+            df_features = build_congestion_features(df)
+
+            # 3. Identify mismatches
+            # build_congestion_features returns 0/1 as Int8
+            df_updates = df_features.filter(
+                pl.col("disruption_flag").cast(pl.Boolean) != pl.col("old_flag")
+            ).select(["zone_id", "hour", "disruption_flag"])
+
+            if df_updates.is_empty():
+                logger.info("No disruption flag updates required.")
+                return
+
+            logger.info("Updating %d rows in database.", len(df_updates))
+
+            # 4. Perform bulk update
+            with conn.cursor() as cur:
+                # Use execute_values for efficient bulk update
+                update_query = """
+                UPDATE congestion AS c
+                SET disruption_flag = v.new_flag::boolean
+                FROM (VALUES %s) AS v(zone_id, hour, new_flag)
+                WHERE c.zone_id = v.zone_id AND c.hour = v.hour
+                """
+                execute_values(cur, update_query, df_updates.rows())
+
+            conn.commit()
+            logger.info("Successfully updated disruption flags.")
+
+    except Exception as e:
+        logger.error("Error updating disruption flags: %s", e)
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
