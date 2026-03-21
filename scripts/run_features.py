@@ -31,32 +31,19 @@ _DB_DSN = os.getenv(
 _OUT_DIR = Path(os.getenv("FEATURES_DIR", "data/features"))
 
 
-def load_from_timescaledb() -> pl.DataFrame:
-    """Fetch demand and congestion variance from TimescaleDB and join them."""
+def load_from_timescaledb() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """Fetch demand, routes, and congestion data from TimescaleDB."""
     logger.info("Connecting to TimescaleDB at %s", _DB_DSN)
-    
     conn = psycopg2.connect(_DB_DSN)
-    
-    # We use a LEFT JOIN to ensure we have all demand rows even if congestion
-    # is missing for some (zone, hour) pairs.
-    query = """
-    SELECT 
-        d.route_id, 
-        d.hour, 
-        d.volume, 
-        COALESCE(c.travel_time_var, 0.0) as delay_index,
-        COALESCE(c.travel_time_var, 0.0) as travel_time_var,
-        COALESCE(c.sample_count, 0) as sample_count
-    FROM demand d
-    LEFT JOIN congestion c ON d.route_id = c.zone_id AND d.hour = c.hour
-    ORDER BY d.route_id, d.hour
-    """
-    
     try:
-        # Polars can read from a DB connection directly
-        df = pl.read_database(query, conn)
-        logger.info("Loaded %d rows from database.", len(df))
-        return df
+        df_demand = pl.read_database("SELECT route_id, hour, volume FROM demand", conn)
+        df_routes = pl.read_database(
+            "SELECT route_id, origin_zone_id, destination_zone_id FROM routes", conn
+        )
+        df_congestion = pl.read_database(
+            "SELECT zone_id, hour, travel_time_var, sample_count FROM congestion", conn
+        )
+        return df_demand, df_routes, df_congestion
     finally:
         conn.close()
 
@@ -64,31 +51,60 @@ def load_from_timescaledb() -> pl.DataFrame:
 def main() -> None:
     out_dir = Path(os.getenv("FEATURES_DIR", "data/features"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # 1. Load data
     try:
-        df = load_from_timescaledb()
+        df_demand, df_routes, df_congestion = load_from_timescaledb()
     except Exception as e:
         logger.error("Failed to load data from TimescaleDB: %s", e)
-        logger.warning("Pipeline cannot proceed without source data.")
         raise SystemExit(1) from e
 
-    if df.is_empty():
-        logger.warning("No data found in database. Run 'make ingest' first.")
+    if df_demand.is_empty():
+        logger.warning("No demand data found. Run 'make ingest' first.")
         raise SystemExit(1)
 
     # 2. Run feature engineering
     logger.info("Building demand features...")
-    df = build_demand_features(df)
-    
+    df = build_demand_features(df_demand)
+
     logger.info("Building calendar features...")
     df = build_calendar_features(df)
-    
+
     logger.info("Building congestion features...")
-    # build_congestion_features expects 'zone_id', but we have 'route_id'
-    df = df.rename({"route_id": "zone_id"})
-    df = build_congestion_features(df)
-    df = df.rename({"zone_id": "route_id"})
+    # Compute features at the zone level first
+    df_cong_feat = build_congestion_features(df_congestion)
+
+    # Resolve route_id to zones and join features twice
+    df = df.join(df_routes, on="route_id", how="inner")
+
+    # Join origin features
+    origin_cols = {
+        c: f"origin_{c}"
+        for c in df_cong_feat.columns
+        if c not in ["zone_id", "hour"]
+    }
+    df = df.join(
+        df_cong_feat.rename(origin_cols),
+        left_on=["origin_zone_id", "hour"],
+        right_on=["zone_id", "hour"],
+        how="left",
+    )
+
+    # Join destination features
+    dest_cols = {
+        c: f"dest_{c}"
+        for c in df_cong_feat.columns
+        if c not in ["zone_id", "hour"]
+    }
+    df = df.join(
+        df_cong_feat.rename(dest_cols),
+        left_on=["destination_zone_id", "hour"],
+        right_on=["zone_id", "hour"],
+        how="left",
+    )
+
+    # Fill missing congestion with 0
+    df = df.fill_null(0.0)
 
     # 3. Materialize
     out_path = out_dir / "features_latest.parquet"

@@ -55,7 +55,7 @@ _FEATURE_NAMES: list[str] = [
     # ── Basic (3) ──────────────────────────────────────────────────────────
     "route_id",
     "horizon_hours",
-    "delay_index",  # Now refers to travel_time_var
+    "origin_delay_index",  # origin travel_time_var
     # ── Calendar – target prediction hour (13) ─────────────────────────────
     "hour_of_day",
     "dow",
@@ -96,12 +96,18 @@ _FEATURE_NAMES: list[str] = [
     "ewm_trend_168h",
     # ── Year-over-year ratio (1) ────────────────────────────────────────────
     "yoy_ratio",
-    # ── Congestion (5) ─────────────────────────────────────────────────────
-    "delay_index_lag1",      # travel_time_var lag1
-    "delay_index_lag24",     # travel_time_var lag24
-    "delay_index_rolling3h", # travel_time_var rolling3h
-    "disruption_flag",
-    "low_confidence_flag",   # sample_count < 10
+    # ── Congestion (11) ─────────────────────────────────────────────────────
+    "dest_delay_index",
+    "origin_delay_index_lag1",
+    "origin_delay_index_lag24",
+    "origin_delay_index_rolling3h",
+    "origin_disruption_flag",
+    "origin_low_confidence_flag",
+    "dest_delay_index_lag1",
+    "dest_delay_index_lag24",
+    "dest_delay_index_rolling3h",
+    "dest_disruption_flag",
+    "dest_low_confidence_flag",
 ]
 
 _N_FEATURES: int = len(_FEATURE_NAMES)
@@ -118,6 +124,8 @@ if _N_FEATURES_ENV != _N_FEATURES:
 _CALENDAR_START: int = 3   # first calendar feature index
 _CALENDAR_END: int = 16    # one past the last calendar feature index (13 features)
 
+_ROUTES_MAP: dict[int, tuple[int, int]] = {}
+
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
@@ -127,13 +135,24 @@ _db_pool: pg_pool.ThreadedConnectionPool | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    global _db_pool
+    global _db_pool, _ROUTES_MAP
     _db_pool = pg_pool.ThreadedConnectionPool(
         minconn=_DB_POOL_MIN,
         maxconn=_DB_POOL_MAX,
         dsn=_DB_DSN,
     )
     logger.info("DB pool created (min=%d, max=%d)", _db_pool.minconn, _db_pool.maxconn)
+
+    # Load routes mapping into memory
+    try:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT route_id, origin_zone_id, destination_zone_id FROM routes")
+                _ROUTES_MAP = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        logger.info("Loaded %d routes from database", len(_ROUTES_MAP))
+    except Exception:
+        logger.exception("Failed to load routes from database")
+
     try:
         yield
     finally:
@@ -298,52 +317,38 @@ def _fetch_congestion_history(zone_id: int, n_hours: int = 168) -> np.ndarray:
 
 def _build_static_features(
     route_id: int,
-    travel_time_var: float,
+    origin_var: float,
+    dest_var: float,
     demand_history: np.ndarray,
-    congestion_history: np.ndarray,
-    sample_count: int = 0,
+    origin_history: np.ndarray,
+    dest_history: np.ndarray,
+    origin_sample_count: int = 0,
+    dest_sample_count: int = 0,
 ) -> np.ndarray:
     """
     Build the feature slots that do not depend on *horizon_hours* or calendar.
-
-    Populates indices:
-      [0]     route_id
-      [2]     delay_index (live travel_time_var)
-      [16-27] Demand lags (1,2,3,6,12,24,48,72,96,120,144,168 h)
-      [28-34] Rolling means of demand (3,6,12,24,48,72,168 h)
-      [35-36] EWM trend of demand (span=24, span=168)
-      [37]    YoY ratio (0.0 sentinel when < 8760 h of history)
-      [38-42] Congestion: delay_index_lag1, delay_index_lag24,
-              delay_index_rolling3h, disruption_flag, low_confidence_flag
-
-    Indices 1 (horizon_hours) and 3-15 (calendar) are left at 0.0 for
-    ``_build_feature_vector`` to fill per horizon step.
-
-    Returns
-    -------
-    np.ndarray of shape (_N_FEATURES,)
     """
     features = np.zeros(_N_FEATURES, dtype=np.float32)
 
     # ── Basic (static part) ────────────────────────────────────────────────
     features[0] = float(route_id)
-    features[2] = float(travel_time_var)
+    features[2] = float(origin_var)
 
     # ── Demand lag features ────────────────────────────────────────────────
-    n_d = len(demand_history)
+    n_vol = len(demand_history)
     for i, lag in enumerate([1, 2, 3, 6, 12, 24, 48, 72, 96, 120, 144, 168]):
-        idx = n_d - lag
+        idx = n_vol - lag
         features[16 + i] = float(demand_history[idx]) if idx >= 0 else 0.0
 
     # ── Rolling means of demand ────────────────────────────────────────────
     for i, window in enumerate([3, 6, 12, 24, 48, 72, 168]):
-        if n_d >= window:
+        if n_vol >= window:
             features[28 + i] = float(np.mean(demand_history[-window:]))
-        elif n_d > 0:
+        elif n_vol > 0:
             features[28 + i] = float(np.mean(demand_history))
 
     # ── EWM trend (span=24 and span=168, adjust=False) ────────────────────
-    if n_d > 0:
+    if n_vol > 0:
         alpha24 = 2.0 / (24.0 + 1.0)
         alpha168 = 2.0 / (168.0 + 1.0)
         ewm24 = float(demand_history[0])
@@ -355,40 +360,45 @@ def _build_static_features(
         features[35] = float(ewm24)
         features[36] = float(ewm168)
 
-    # ── YoY ratio – 0.0 sentinel when fewer than 8760 h of history ────────
-    # features[37] stays 0.0
+    # ── YoY ratio (index 37) stays 0.0 for now
 
     # ── Congestion features ───────────────────────────────────────────────
-    n_c = len(congestion_history)
-    features[38] = float(congestion_history[-1]) if n_c >= 1 else 0.0  # lag1
-    features[39] = float(congestion_history[-24]) if n_c >= 24 else 0.0  # lag24
-    if n_c >= 3:
-        features[40] = float(np.mean(congestion_history[-3:]))
-    elif n_c > 0:
-        features[40] = float(np.mean(congestion_history))
-    if n_c >= 168:
-        mean168 = float(np.mean(congestion_history[-168:]))
-        std168 = float(np.std(congestion_history[-168:]))
-        features[41] = 1.0 if float(congestion_history[-1]) > mean168 + 2.0 * std168 else 0.0
-    
-    features[42] = 1.0 if sample_count < 10 else 0.0
+    features[38] = float(dest_var)
+
+    # Origin history features (39-43)
+    n_o = len(origin_history)
+    features[39] = float(origin_history[-1]) if n_o >= 1 else 0.0  # lag1
+    features[40] = float(origin_history[-24]) if n_o >= 24 else 0.0  # lag24
+    if n_o >= 3:
+        features[41] = float(np.mean(origin_history[-3:]))
+    elif n_o > 0:
+        features[41] = float(np.mean(origin_history))
+    if n_o >= 168:
+        m, s = np.mean(origin_history[-168:]), np.std(origin_history[-168:])
+        features[42] = 1.0 if float(origin_history[-1]) > m + 2.0 * s else 0.0
+    features[43] = 1.0 if origin_sample_count < 10 else 0.0
+
+    # Destination history features (44-48)
+    n_d = len(dest_history)
+    features[44] = float(dest_history[-1]) if n_d >= 1 else 0.0  # lag1
+    features[45] = float(dest_history[-24]) if n_d >= 24 else 0.0  # lag24
+    if n_d >= 3:
+        features[46] = float(np.mean(dest_history[-3:]))
+    elif n_d > 0:
+        features[46] = float(np.mean(dest_history))
+    if n_d >= 168:
+        m, s = np.mean(dest_history[-168:]), np.std(dest_history[-168:])
+        features[47] = 1.0 if float(dest_history[-1]) > m + 2.0 * s else 0.0
+    features[48] = 1.0 if dest_sample_count < 10 else 0.0
 
     return features
+
 
 def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np.ndarray:
     """
     Assemble the final _N_FEATURES-dimensional feature vector for a single
     *horizon_hours* step by filling the horizon-dependent slots into a copy
     of *static_features*.
-
-    Populates indices:
-      [1]    horizon_hours
-      [3-15] Calendar features for the target prediction hour (derived from
-             _FEATURE_NAMES[_CALENDAR_START:_CALENDAR_END])
-
-    Returns
-    -------
-    np.ndarray of shape (1, _N_FEATURES)
     """
     features = static_features.copy()
     features[1] = float(horizon_hours)
@@ -399,38 +409,45 @@ def _build_feature_vector(horizon_hours: int, static_features: np.ndarray) -> np
     for i, key in enumerate(_FEATURE_NAMES[_CALENDAR_START:_CALENDAR_END]):
         features[_CALENDAR_START + i] = float(cal[key])
 
-    if features.shape[0] != _N_FEATURES:
-        raise ValueError(
-            f"Feature vector length {features.shape[0]} != N_FEATURES {_N_FEATURES}"
-        )
-
     return features.reshape(1, -1)
+
 
 def _build_feature_matrix(
     route_id: int,
     horizon_hours: int,
-    travel_time_var: float,
-    sample_count: int,
+    origin_var: float,
+    dest_var: float,
+    origin_sample_count: int,
+    dest_sample_count: int,
     demand_history: np.ndarray | None = None,
-    congestion_history: np.ndarray | None = None,
+    origin_history: np.ndarray | None = None,
+    dest_history: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Construct a batch feature matrix for all horizon steps in one shot.
     """
     if demand_history is None:
         demand_history = np.empty(0, dtype=np.float32)
-    if congestion_history is None:
-        congestion_history = np.empty(0, dtype=np.float32)
+    if origin_history is None:
+        origin_history = np.empty(0, dtype=np.float32)
+    if dest_history is None:
+        dest_history = np.empty(0, dtype=np.float32)
 
     static = _build_static_features(
         route_id,
-        travel_time_var,
+        origin_var,
+        dest_var,
         demand_history,
-        congestion_history,
-        sample_count=sample_count,
+        origin_history,
+        dest_history,
+        origin_sample_count=origin_sample_count,
+        dest_sample_count=dest_sample_count,
     )
-    rows = [_build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)]
+    rows = [
+        _build_feature_vector(h, static).flatten() for h in range(1, horizon_hours + 1)
+    ]
     return np.array(rows, dtype=np.float32)
+
 
 def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
     """Run each quantile ONNX session exactly once with the full batch matrix."""
@@ -443,9 +460,11 @@ def _run_onnx(features: np.ndarray) -> dict[str, list[float]]:
         results[q_name] = out.tolist()
     return results
 
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
@@ -486,24 +505,30 @@ async def calibration() -> CalibrationResponse:
     except (ValidationError, TypeError) as exc:
         logger.error("Schema mismatch in calibration file %s: %s", _CALIBRATION_PATH, exc)
         raise HTTPException(
-            status_code=500, detail="Calibration file schema does not match expected format"
+            status_code=500,
+            detail="Calibration file schema does not match expected format",
         ) from exc
+
 
 @app.post("/forecast", response_model=ForecastResponse)
 async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     t0 = time.perf_counter()
     horizon_hours = request.horizon * 24
 
-    # 1. Fetch live congestion and subway data
-    travel_time_var, sample_count = _fetch_bus_congestion(request.route_id)
-    subway_delay = _fetch_subway_delay(request.route_id)
-    
-    # Log subway_delay for now as it's a supplementary signal
-    if subway_delay > 0:
-        logger.info("Zone %d has subway delay: %.2fs", request.route_id, subway_delay)
+    # Resolve route_id to origin/destination zones
+    zones = _ROUTES_MAP.get(request.route_id)
+    if not zones:
+        raise HTTPException(
+            status_code=404, detail=f"Route ID {request.route_id} not found"
+        )
+    origin_id, dest_id = zones
 
-    # 2. Check cache (using travel_time_var as the key part)
-    cached = _cache.get(request.route_id, request.horizon, travel_time_var)
+    # 1. Fetch live congestion and subway data
+    origin_var, origin_sample = _fetch_bus_congestion(origin_id)
+    dest_var, dest_sample = _fetch_bus_congestion(dest_id)
+
+    # 2. Check cache (using origin travel_time_var as part of key)
+    cached = _cache.get(request.route_id, request.horizon, origin_var)
     if cached is not None:
         latency_ms = (time.perf_counter() - t0) * 1000
         resp_content: dict[str, Any] = {
@@ -516,18 +541,22 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
             headers={"X-Latency-Ms": f"{latency_ms:.1f}"},
         )
 
-    # 3. Fetch historical time series once
+    # 3. Fetch historical time series
     demand_history = _fetch_demand_history(request.route_id)
-    congestion_history = _fetch_congestion_history(request.route_id)
+    origin_history = _fetch_congestion_history(origin_id)
+    dest_history = _fetch_congestion_history(dest_id)
 
     # 4. Build batch feature matrix and run inference
     features = _build_feature_matrix(
-        request.route_id, 
-        horizon_hours, 
-        travel_time_var, 
-        sample_count,
-        demand_history, 
-        congestion_history
+        request.route_id,
+        horizon_hours,
+        origin_var,
+        dest_var,
+        origin_sample,
+        dest_sample,
+        demand_history,
+        origin_history,
+        dest_history,
     )
     preds = _run_onnx(features)
 
@@ -538,7 +567,7 @@ async def forecast(request: ForecastRequest, raw_request: Request) -> Response:
     }
 
     # 5. Store in cache
-    _cache.set(request.route_id, request.horizon, travel_time_var, payload)
+    _cache.set(request.route_id, request.horizon, origin_var, payload)
 
     latency_ms = (time.perf_counter() - t0) * 1000
     resp_content = {

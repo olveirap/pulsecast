@@ -27,7 +27,7 @@ _TLC_BASE = (
     "https://d37ci6vzurychx.cloudfront.net/trip-data/{color}_tripdata_{year}-{month:02d}.parquet"
 )
 
-_KEEP_COLS = ["pickup_datetime", "PULocationID", "trip_distance", "fare_amount"]
+_KEEP_COLS = ["pickup_datetime", "PULocationID", "DOLocationID", "trip_distance", "fare_amount"]
 
 # Column name aliases differ between Yellow and Green trip record schemas.
 _COL_ALIASES: dict[str, dict[str, str]] = {
@@ -96,43 +96,72 @@ def load_and_filter(path: Path, color: str, year: int, month: int) -> pl.DataFra
 
 
 def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate to hourly pickup counts per TLC zone_id."""
+    """Aggregate to hourly counts per (PULocationID, DOLocationID) pair."""
     if df.is_empty():
-        return pl.DataFrame(schema={"zone_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32})
+        return pl.DataFrame(
+            schema={
+                "PULocationID": pl.Int64,
+                "DOLocationID": pl.Int64,
+                "hour": pl.Datetime("us"),
+                "pickup_count": pl.UInt32,
+            }
+        )
     df = df.with_columns(
         pl.col("pickup_datetime").dt.truncate("1h").alias("hour"),
-        pl.col("PULocationID").cast(pl.Int64).alias("zone_id"),
+        pl.col("PULocationID").cast(pl.Int64),
+        pl.col("DOLocationID").cast(pl.Int64),
     )
     return (
-        df.group_by(["zone_id", "hour"])
+        df.group_by(["PULocationID", "DOLocationID", "hour"])
         .agg(pl.len().alias("pickup_count"))
-        .sort(["zone_id", "hour"])
+        .sort(["PULocationID", "DOLocationID", "hour"])
     )
 
 
 def write_to_db(df: pl.DataFrame, dsn: str) -> int:
     """Upsert aggregated hourly counts into the *demand* hypertable.
 
-    The ``zone_id`` column maps directly to ``demand.route_id`` and ``hour`` is made
-    explicitly UTC-aware before insertion so that it aligns correctly with the
-    ``TIMESTAMPTZ`` column type.
+    Joins the input dataframe with the ``routes`` table to resolve the
+    (PULocationID, DOLocationID) pairs to internal ``route_id``s.
+    Only rows matching a known route are written.
 
     Returns the number of rows written.
     """
     if df.is_empty():
         return 0
 
-    params = [
-        (
-            int(r["zone_id"]),
-            r["hour"].replace(tzinfo=UTC),
-            int(r["pickup_count"]),
-        )
-        for r in df.iter_rows(named=True)
-    ]
-
     conn = psycopg2.connect(dsn)
     try:
+        # 1. Fetch routes mapping
+        with conn.cursor() as cur:
+            cur.execute("SELECT route_id, origin_zone_id, destination_zone_id FROM routes")
+            routes_map = pl.DataFrame(
+                cur.fetchall(),
+                schema=["route_id", "PULocationID", "DOLocationID"],
+                orient="row",
+            )
+
+        if routes_map.is_empty():
+            logger.warning("Routes table is empty. Run scripts/initialize_routes.py first.")
+            return 0
+
+        # 2. Join and filter
+        df = df.join(routes_map, on=["PULocationID", "DOLocationID"], how="inner")
+        
+        if df.is_empty():
+            logger.warning("No rows matched existing routes in the database.")
+            return 0
+
+        params = [
+            (
+                int(r["route_id"]),
+                r["hour"].replace(tzinfo=UTC),
+                int(r["pickup_count"]),
+            )
+            for r in df.iter_rows(named=True)
+        ]
+
+        # 3. Upsert
         with conn:
             with conn.cursor() as cur:
                 execute_values(
@@ -179,14 +208,19 @@ def ingest(
 
     if not frames:
         return pl.DataFrame(
-            schema={"zone_id": pl.Int64, "hour": pl.Datetime("us"), "pickup_count": pl.UInt32}
+            schema={
+                "PULocationID": pl.Int64,
+                "DOLocationID": pl.Int64,
+                "hour": pl.Datetime("us"),
+                "pickup_count": pl.UInt32,
+            }
         )
 
     combined = (
         pl.concat(frames)
-        .group_by(["zone_id", "hour"])
+        .group_by(["PULocationID", "DOLocationID", "hour"])
         .agg(pl.col("pickup_count").sum())
-        .sort(["zone_id", "hour"])
+        .sort(["PULocationID", "DOLocationID", "hour"])
     )
 
     if dsn is not None:
