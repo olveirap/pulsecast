@@ -92,6 +92,7 @@ cache key.
   signals.
 - Dynamic bucketing: Too complex for a low-latency serving layer.
 
+
 ---
 
 ## ADR-005 – Route-based (Origin-Destination) Demand Model
@@ -112,5 +113,32 @@ Redefine the demand unit as a **route**, uniquely identified by an `(origin_zone
 **Alternatives considered:**
 - All-to-all OD matrix: Rejected due to sparse data and excessive model size.
 - Clustered zones: Considered, but TLC zones are already meaningful geographic units.
+
+---
+
+## ADR-006 – Removal of Feast Feature Store
+
+**Status:** Accepted
+
+**Context:**  
+The original build plan included Feast as a feature store for managing the
+offline/online feature parity.  However, as the project evolved to use
+TimescaleDB for storage and Polars for feature engineering, the added
+complexity of Feast (registry management, materialization jobs, and Python
+SDK overhead) outweighed its benefits for a v0.1 release.
+
+**Decision:**  
+Remove the `feast` dependency and all related infrastructure.  Adopt a
+"direct-query" architecture where:
+1. **Offline (Training):** Polars queries TimescaleDB directly and materializes Parquet snapshots.
+2. **Online (Serving):** FastAPI fetches raw signals from TimescaleDB/Redis and applies scalar feature logic in memory.
+
+**Rationale:**
+- **Lower Latency:** Direct SQL/Cache lookups eliminate the Feast SDK abstraction layer.
+- **Reduced Complexity:** No need to manage a Feast registry or materialization DAGs.
+- **Architecture Fit:** Polars provides the high-performance transformation engine required, making a separate feature store redundant for this scale.
+
+**Alternatives considered:**
+- Fully implementing Feast: Rejected due to high operational surface area.
 
 ---

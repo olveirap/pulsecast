@@ -5,8 +5,12 @@ PYTHON   ?= python
 POETRY   ?= poetry
 MONTHS   ?= 24
 HORIZON  ?= 7
-BACKFILL_START ?= $(shell date -d '18 months ago' +%Y-%m-%d 2>/dev/null || date -v-18m +%Y-%m-%d)
-BACKFILL_END   ?= $(shell date +%Y-%m-%d)
+# Dynamic backfill dates: defaults to 180 days ago until today
+# Override with BACKFILL_START and BACKFILL_END environment variables for testing
+TODAY        := $(shell date +%Y-%m-%d)
+BACKFILL_DAYS := 180
+BACKFILL_START ?= $(shell date -d "$(TODAY) - $(BACKFILL_DAYS) days" +%Y-%m-%d)
+BACKFILL_END   ?= $(TODAY)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest: ingest-tlc ingest-subway ingest-bus
@@ -34,6 +38,9 @@ build-zone-maps:
 # ── Feature engineering ───────────────────────────────────────────────────────
 features:
 	$(POETRY) run python scripts/run_features.py
+
+update-disruption-flag:
+	$(POETRY) run python scripts/update_disruption_flag.py
 
 # ── Model training ────────────────────────────────────────────────────────────
 train:
