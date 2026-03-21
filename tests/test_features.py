@@ -14,8 +14,6 @@ from datetime import datetime, timedelta
 import polars as pl
 import pytest
 
-from unittest.mock import patch
-
 from pulsecast.features.calendar import build_calendar_features
 from pulsecast.features.congestion import build_congestion_features
 from pulsecast.features.demand import build_demand_features
