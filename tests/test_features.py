@@ -176,6 +176,26 @@ def test_calendar_row_count_preserved():
     assert result.height == raw.height
 
 
+def test_calendar_nyc_event_flag_from_api(monkeypatch):
+    """Verify that nyc_event_flag is set for a date returned by the mocked API."""
+    from datetime import date
+    from unittest.mock import MagicMock
+
+    from pulsecast.features.calendar import get_nyc_event_dates
+
+    # We mock the fetch_nyc_events function in the ingest module
+    mock_fetch = MagicMock(return_value={date(2024, 5, 20)})
+    
+    # Clear the cache to ensure our mock is used even if previous tests called it
+    get_nyc_event_dates.cache_clear()
+    
+    monkeypatch.setattr("pulsecast.features.calendar.fetch_nyc_events", mock_fetch)
+    
+    df = build_calendar_features(_calendar_df([datetime(2024, 5, 20, 12)]))
+    assert df["nyc_event_flag"][0] == 1
+    assert mock_fetch.called
+
+
 # ---------------------------------------------------------------------------
 # build_congestion_features
 # ---------------------------------------------------------------------------
