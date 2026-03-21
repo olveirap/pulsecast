@@ -1,8 +1,11 @@
 import unittest
-from unittest.mock import MagicMock, patch
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+
 import polars as pl
+
 from scripts.update_disruption_flag import main
+
 
 class TestUpdateDisruptionFlag(unittest.TestCase):
     @patch("scripts.update_disruption_flag.psycopg2.connect")
