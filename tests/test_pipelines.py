@@ -58,23 +58,31 @@ def test_run_features(mock_read_db, mock_connect):
     """run_features should load data, build features, and write parquet."""
     print("\nStarting test_run_features...")
     from scripts.run_features import main
-    
-    # Mock DB data - use schema to be 100% sure
-    schema = {
-        "route_id": pl.Int32,
-        "hour": pl.Datetime,
-        "volume": pl.Int32,
-        "delay_index": pl.Float64
-    }
-    mock_df = pl.DataFrame({
+
+    # Mock DB data for demand
+    mock_df_demand = pl.DataFrame({
         "route_id": [132, 132],
         "hour": [datetime(2024, 1, 1, 0), datetime(2024, 1, 1, 1)],
         "volume": [10, 20],
-        "delay_index": [0.5, 0.6]
-    }, schema=schema)
-    mock_read_db.return_value = mock_df
-    print("Mock data prepared.")
-    
+    }, schema={"route_id": pl.Int32, "hour": pl.Datetime, "volume": pl.Int32})
+
+    # Mock DB data for routes
+    mock_df_routes = pl.DataFrame({
+        "route_id": [132],
+        "origin_zone_id": [10],
+        "destination_zone_id": [20],
+    }, schema={"route_id": pl.Int32, "origin_zone_id": pl.Int32, "destination_zone_id": pl.Int32})
+
+    # Mock DB data for congestion
+    mock_df_congestion = pl.DataFrame({
+        "zone_id": [10, 20],
+        "hour": [datetime(2024, 1, 1, 0), datetime(2024, 1, 1, 0)],
+        "travel_time_var": [0.5, 0.6],
+        "sample_count": [15, 15],
+    }, schema={"zone_id": pl.Int32, "hour": pl.Datetime, "travel_time_var": pl.Float64, "sample_count": pl.Int32})
+
+    mock_read_db.side_effect = [mock_df_demand, mock_df_routes, mock_df_congestion]
+    print("Mock data prepared.")    
     with tempfile.TemporaryDirectory() as tmpdir:
         with patch.dict(os.environ, {"FEATURES_DIR": tmpdir}):
             print("Calling run_features.main()...")
@@ -129,8 +137,8 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             "route_id": [132] * n_rows,
             "hour": pl.datetime_range(start_dt, end_dt, "1h", eager=True),
             "volume": rng.integers(0, 100, n_rows),
-            "delay_index": rng.uniform(0, 1, n_rows),
-            "hour_of_day": [i % 24 for i in range(n_rows)],
+            "origin_travel_time_var": rng.uniform(0, 1, n_rows),
+            "dest_travel_time_var": rng.uniform(0, 1, n_rows),            "hour_of_day": [i % 24 for i in range(n_rows)],
             "dow": [(i // 24) % 7 for i in range(n_rows)],
             "month": [1] * n_rows,
             "week_of_year": [1] * n_rows,
@@ -147,9 +155,12 @@ def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_
             "rolling_mean_168h": rng.uniform(0, 100, n_rows),
             "ewm_trend_24h": rng.uniform(0, 100, n_rows),
             "yoy_ratio": rng.uniform(0.5, 1.5, n_rows),
-            "delay_index_lag1": rng.uniform(0, 1, n_rows),
-            "delay_index_rolling3h": rng.uniform(0, 1, n_rows),
-            "disruption_flag": [0] * n_rows
+            "origin_delay_index_lag1": rng.uniform(0, 1, n_rows),
+            "origin_delay_index_rolling3h": rng.uniform(0, 1, n_rows),
+            "origin_disruption_flag": [0] * n_rows,
+            "dest_delay_index_lag1": rng.uniform(0, 1, n_rows),
+            "dest_delay_index_rolling3h": rng.uniform(0, 1, n_rows),
+            "dest_disruption_flag": [0] * n_rows,
         })
         missing = sorted(set(LGBM_FEATURES) - set(df.columns))
         assert not missing, f"Synthetic training data missing required columns: {missing}"
@@ -192,7 +203,8 @@ def test_prepare_data_drops_split_boundary_hour():
         "route_id": routes,
         "hour": hours,
         "volume": [10.0] * n_rows,
-        "delay_index": [0.1] * n_rows,
+        "origin_travel_time_var": [0.1] * n_rows,
+        "dest_travel_time_var": [0.1] * n_rows,
         "hour_of_day": [h.hour for h in hours],
         "dow": [1] * n_rows,
         "month": [1] * n_rows,
@@ -210,9 +222,12 @@ def test_prepare_data_drops_split_boundary_hour():
         "rolling_mean_168h": [1.0] * n_rows,
         "ewm_trend_24h": [1.0] * n_rows,
         "yoy_ratio": [1.0] * n_rows,
-        "delay_index_lag1": [0.1] * n_rows,
-        "delay_index_rolling3h": [0.1] * n_rows,
-        "disruption_flag": [0] * n_rows,
+        "origin_delay_index_lag1": [0.1] * n_rows,
+        "origin_delay_index_rolling3h": [0.1] * n_rows,
+        "origin_disruption_flag": [0] * n_rows,
+        "dest_delay_index_lag1": [0.1] * n_rows,
+        "dest_delay_index_rolling3h": [0.1] * n_rows,
+        "dest_disruption_flag": [0] * n_rows,
     })
 
     _, _, _, _, train_df, val_df = prepare_data(df)

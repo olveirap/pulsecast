@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import psycopg2.pool
 import pytest
 from fastapi.testclient import TestClient
 
@@ -58,8 +60,13 @@ def _make_pool_mock() -> tuple[MagicMock, MagicMock, MagicMock]:
     ``cursor_mock``.
     """
     mock_cursor = MagicMock()
-    mock_cursor.fetchone.return_value = (0.5,)
-    mock_cursor.fetchall.return_value = []
+    mock_cursor.fetchone.return_value = (0.5, 10)
+    mock_cursor.fetchall.return_value = [
+        (132, 10, 20),
+        (5, 10, 20),
+        (1, 10, 20),
+        (7, 10, 20)
+    ]
 
     mock_conn = MagicMock()
     mock_conn.__enter__ = lambda s: s
@@ -101,16 +108,18 @@ def app_client():
         if mod_name.startswith("serving"):
             del sys.modules[mod_name]
 
-    with (
-        patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
-        patch("psycopg2.pool.ThreadedConnectionPool", mock_pool_class),
-    ):
-        import pulsecast.serving.main as main_mod
+    # Force N_FEATURES to 49 for tests to match the expected length of _FEATURE_NAMES
+    with patch.dict(os.environ, {"N_FEATURES": "49"}):
+        with (
+            patch.dict(sys.modules, {"redis": redis_module, "onnxruntime": ort_module}),
+        ):
+            import pulsecast.serving.main as main_mod
 
-        importlib.reload(main_mod)
-
-        with TestClient(main_mod.app, raise_server_exceptions=False) as client:
-            yield client, main_mod, redis_client
+            importlib.reload(main_mod)
+            
+            with patch.object(main_mod.pg_pool, "ThreadedConnectionPool", new=mock_pool_class):
+                with TestClient(main_mod.app, raise_server_exceptions=False) as client:
+                    yield client, main_mod, redis_client
 
 
 # ---------------------------------------------------------------------------
