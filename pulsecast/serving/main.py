@@ -15,8 +15,7 @@ import json
 import logging
 import os
 import time
-from contextlib import asynccontextmanager, contextmanager
-from datetime import UTC, datetime, timedelta
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +25,6 @@ from fastapi.responses import JSONResponse
 from psycopg2 import pool as pg_pool
 from pydantic import ValidationError
 
-from pulsecast.features.calendar import scalar_calendar_features
 from pulsecast.serving.cache import ForecastCache
 from pulsecast.serving.features import (
     N_FEATURES,
@@ -34,7 +32,6 @@ from pulsecast.serving.features import (
     fetch_bus_congestion,
     fetch_congestion_history,
     fetch_demand_history,
-    fetch_subway_delay,
     get_conn,
 )
 from pulsecast.serving.schemas import CalibrationResponse, ForecastRequest, ForecastResponse

@@ -10,7 +10,7 @@ from __future__ import annotations
 # Unit tests for feature-vector helpers.
 # ---------------------------------------------------------------------------
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest

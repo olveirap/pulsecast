@@ -15,7 +15,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import psycopg2.pool
 import pytest
 from fastapi.testclient import TestClient
 

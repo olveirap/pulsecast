@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from pulsecast.serving.features import build_feature_matrix, N_FEATURES
+from pulsecast.serving.features import N_FEATURES, build_feature_matrix
 
 # ---------------------------------------------------------------------------
 # Helpers
