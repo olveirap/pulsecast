@@ -5,8 +5,8 @@ PYTHON   ?= python
 POETRY   ?= poetry
 MONTHS   ?= 24
 HORIZON  ?= 7
-BACKFILL_START ?= $(shell date -d '18 months ago' +%Y-%m-%d 2>/dev/null || date -v-18m +%Y-%m-%d)
-BACKFILL_END   ?= $(shell date +%Y-%m-%d)
+BACKFILL_START ?= 2024-09-21
+BACKFILL_END   ?= 2026-03-21
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
 ingest: ingest-tlc ingest-subway ingest-bus
