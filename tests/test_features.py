@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 import polars as pl
 import pytest
 
+from unittest.mock import patch
+
 from pulsecast.features.calendar import build_calendar_features
 from pulsecast.features.congestion import build_congestion_features
 from pulsecast.features.demand import build_demand_features
@@ -161,6 +163,23 @@ def test_calendar_nyc_event_flag_regular_day():
     """A random midweek date should not be flagged."""
     df = build_calendar_features(_calendar_df([datetime(2024, 6, 5, 9)]))
     assert df["nyc_event_flag"][0] == 0
+
+
+def test_calendar_nyc_event_flag_dynamic():
+    """Test that nyc_event_flag can be populated from dynamic API results."""
+    # We mock the function that will be implemented in Step 2.
+    # It will be imported in pulsecast.features.calendar.
+    with patch("pulsecast.features.calendar.get_nyc_events") as mock_get:
+        # Mock returns June 15th as an event
+        mock_get.return_value = frozenset({(6, 15)})
+
+        # Test a date that is in the mock set
+        df_event = build_calendar_features(_calendar_df([datetime(2024, 6, 15, 10)]))
+        assert df_event["nyc_event_flag"][0] == 1
+
+        # Test a date that is NOT in the mock set
+        df_no_event = build_calendar_features(_calendar_df([datetime(2024, 6, 16, 10)]))
+        assert df_no_event["nyc_event_flag"][0] == 0
 
 
 def test_calendar_days_to_holiday_non_negative():
