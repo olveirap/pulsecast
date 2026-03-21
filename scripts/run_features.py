@@ -16,7 +16,7 @@ import psycopg2
 
 from pulsecast.features.calendar import build_calendar_features
 from pulsecast.features.congestion import build_congestion_features
-from pulsecast.features.demand import build_demand_features
+from pulsecast.features.demand import build_demand_features, build_duration_features
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def load_from_timescaledb() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     logger.info("Connecting to TimescaleDB at %s", _DB_DSN)
     conn = psycopg2.connect(_DB_DSN)
     try:
-        df_demand = pl.read_database("SELECT route_id, hour, volume FROM demand", conn)
+        df_demand = pl.read_database("SELECT route_id, hour, volume, avg_duration FROM demand", conn)
         df_routes = pl.read_database(
             "SELECT route_id, origin_zone_id, destination_zone_id FROM routes", conn
         )
@@ -66,6 +66,9 @@ def main() -> None:
     # 2. Run feature engineering
     logger.info("Building demand features...")
     df = build_demand_features(df_demand)
+
+    logger.info("Building duration features...")
+    df = build_duration_features(df)
 
     logger.info("Building calendar features...")
     df = build_calendar_features(df)

@@ -124,7 +124,7 @@ services:
       TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
       REDIS_URL: redis://redis:6379/0
       ONNX_DIR: /app/models/onnx
-      N_FEATURES: "49"
+      N_FEATURES: "54"
     volumes:
       - onnx_models:/app/models/onnx:ro
     ports:

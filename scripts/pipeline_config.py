@@ -29,4 +29,9 @@ LGBM_FEATURES = [
     "dest_delay_index_lag1",
     "dest_delay_index_rolling3h",
     "dest_disruption_flag",
+    "duration_lag_1h",
+    "duration_lag_24h",
+    "duration_lag_168h",
+    "duration_rolling_mean_3h",
+    "duration_rolling_mean_24h",
 ]

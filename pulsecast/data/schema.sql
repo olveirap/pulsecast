@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS demand (
     route_id    INTEGER     NOT NULL,
     hour        TIMESTAMPTZ NOT NULL,
     volume      INTEGER     NOT NULL CHECK (volume >= 0),
+    avg_duration DOUBLE PRECISION,
     PRIMARY KEY (route_id, hour)
 );
 

@@ -27,15 +27,17 @@ _TLC_BASE = (
     "https://d37ci6vzurychx.cloudfront.net/trip-data/{color}_tripdata_{year}-{month:02d}.parquet"
 )
 
-_KEEP_COLS = ["pickup_datetime", "PULocationID", "DOLocationID", "trip_distance", "fare_amount"]
+_KEEP_COLS = ["pickup_datetime", "dropoff_datetime", "PULocationID", "DOLocationID", "trip_distance", "fare_amount"]
 
 # Column name aliases differ between Yellow and Green trip record schemas.
 _COL_ALIASES: dict[str, dict[str, str]] = {
     "yellow": {
         "tpep_pickup_datetime": "pickup_datetime",
+        "tpep_dropoff_datetime": "dropoff_datetime",
     },
     "green": {
         "lpep_pickup_datetime": "pickup_datetime",
+        "lpep_dropoff_datetime": "dropoff_datetime",
     },
 }
 
@@ -82,11 +84,15 @@ def load_and_filter(path: Path, color: str, year: int, month: int) -> pl.DataFra
         df = df.rename(rename_map)
     available = [c for c in _KEEP_COLS if c in df.columns]
     df = df.select(available)
-    # Ensure pickup_datetime is a proper datetime.
+    # Ensure datetimes are proper datetimes.
     if "pickup_datetime" in df.columns:
         df = df.with_columns(
             pl.col("pickup_datetime").cast(pl.Datetime("us"))
         )
+        if "dropoff_datetime" in df.columns:
+            df = df.with_columns(
+                pl.col("dropoff_datetime").cast(pl.Datetime("us"))
+            )
         # Filter to target year and month to avoid outliers
         df = df.filter(
             (pl.col("pickup_datetime").dt.year() == year) &
@@ -96,7 +102,7 @@ def load_and_filter(path: Path, color: str, year: int, month: int) -> pl.DataFra
 
 
 def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate to hourly counts per (PULocationID, DOLocationID) pair."""
+    """Aggregate to hourly counts and average duration per (PU, DO) pair."""
     if df.is_empty():
         return pl.DataFrame(
             schema={
@@ -104,8 +110,21 @@ def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
                 "DOLocationID": pl.Int64,
                 "hour": pl.Datetime("us"),
                 "pickup_count": pl.UInt32,
+                "avg_duration": pl.Float64,
             }
         )
+    
+    # Calculate duration in seconds
+    if "dropoff_datetime" in df.columns and "pickup_datetime" in df.columns:
+        df = df.with_columns(
+            (pl.col("dropoff_datetime") - pl.col("pickup_datetime"))
+            .dt.total_seconds()
+            .clip(lower_bound=0)
+            .alias("duration")
+        )
+    else:
+        df = df.with_columns(pl.lit(0.0).alias("duration"))
+
     df = df.with_columns(
         pl.col("pickup_datetime").dt.truncate("1h").alias("hour"),
         pl.col("PULocationID").cast(pl.Int64),
@@ -113,7 +132,12 @@ def aggregate_hourly(df: pl.DataFrame) -> pl.DataFrame:
     )
     return (
         df.group_by(["PULocationID", "DOLocationID", "hour"])
-        .agg(pl.len().alias("pickup_count"))
+        .agg(
+            [
+                pl.len().alias("pickup_count"),
+                pl.col("duration").mean().alias("avg_duration"),
+            ]
+        )
         .sort(["PULocationID", "DOLocationID", "hour"])
     )
 
@@ -157,6 +181,7 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
                 int(r["route_id"]),
                 r["hour"].replace(tzinfo=UTC),
                 int(r["pickup_count"]),
+                float(r["avg_duration"]) if r["avg_duration"] is not None else 0.0,
             )
             for r in df.iter_rows(named=True)
         ]
@@ -167,10 +192,12 @@ def write_to_db(df: pl.DataFrame, dsn: str) -> int:
                 execute_values(
                     cur,
                     """
-                    INSERT INTO demand (route_id, hour, volume)
+                    INSERT INTO demand (route_id, hour, volume, avg_duration)
                     VALUES %s
                     ON CONFLICT (route_id, hour)
-                    DO UPDATE SET volume = EXCLUDED.volume;
+                    DO UPDATE SET 
+                        volume = EXCLUDED.volume,
+                        avg_duration = EXCLUDED.avg_duration;
                     """,
                     params,
                 )
@@ -213,13 +240,19 @@ def ingest(
                 "DOLocationID": pl.Int64,
                 "hour": pl.Datetime("us"),
                 "pickup_count": pl.UInt32,
+                "avg_duration": pl.Float64,
             }
         )
 
     combined = (
         pl.concat(frames)
         .group_by(["PULocationID", "DOLocationID", "hour"])
-        .agg(pl.col("pickup_count").sum())
+        .agg(
+            [
+                pl.col("pickup_count").sum(),
+                pl.col("avg_duration").mean(),
+            ]
+        )
         .sort(["PULocationID", "DOLocationID", "hour"])
     )
 
