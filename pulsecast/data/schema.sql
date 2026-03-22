@@ -4,12 +4,23 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
 
 -- -----------------------------------------------------------------------
+-- routes: Reference table mapping route_id to (origin, destination) pairs
+-- -----------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS routes (
+    route_id          SERIAL PRIMARY KEY,
+    origin_zone_id    INTEGER NOT NULL,
+    destination_zone_id INTEGER NOT NULL,
+    UNIQUE(origin_zone_id, destination_zone_id)
+);
+
+-- -----------------------------------------------------------------------
 -- demand: hourly pickup volume per route/zone
 -- -----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS demand (
     route_id    INTEGER     NOT NULL,
     hour        TIMESTAMPTZ NOT NULL,
     volume      INTEGER     NOT NULL CHECK (volume >= 0),
+    avg_duration DOUBLE PRECISION,
     PRIMARY KEY (route_id, hour)
 );
 

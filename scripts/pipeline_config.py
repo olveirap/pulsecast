@@ -4,7 +4,8 @@ from __future__ import annotations
 
 LGBM_FEATURES = [
     "route_id",
-    "delay_index",
+    "origin_travel_time_var",
+    "dest_travel_time_var",
     "hour_of_day",
     "dow",
     "month",
@@ -22,7 +23,15 @@ LGBM_FEATURES = [
     "rolling_mean_168h",
     "ewm_trend_24h",
     "yoy_ratio",
-    "delay_index_lag1",
-    "delay_index_rolling3h",
-    "disruption_flag",
+    "origin_delay_index_lag1",
+    "origin_delay_index_rolling3h",
+    "origin_disruption_flag",
+    "dest_delay_index_lag1",
+    "dest_delay_index_rolling3h",
+    "dest_disruption_flag",
+    "duration_lag_1h",
+    "duration_lag_24h",
+    "duration_lag_168h",
+    "duration_rolling_mean_3h",
+    "duration_rolling_mean_24h",
 ]

@@ -92,6 +92,28 @@ cache key.
   signals.
 - Dynamic bucketing: Too complex for a low-latency serving layer.
 
+
+---
+
+## ADR-005 – Route-based (Origin-Destination) Demand Model
+
+**Status:** Accepted
+
+**Context:**  
+The initial version of Pulsecast forecasted demand based on pickup zone only. While useful for general busy-ness, logistics and delivery use cases require knowing the destination to estimate resource requirements and impact on destination-zone congestion.
+
+**Decision:**  
+Redefine the demand unit as a **route**, uniquely identified by an `(origin_zone_id, destination_zone_id)` pair.  To maintain model cardinality and focus on high-impact lanes, only routes with an average volume > 1000 trips/month (calculated over a 3-month trailing window) are tracked.
+
+**Rationale:**
+- **Granularity:** OD pairs provide the "lane" visibility required for modern shipment forecasting.
+- **Tractability:** NYC has ~260 zones, resulting in ~67,000 potential pairs. Filtering to >1000 trips/month reduces this to ~1,000 high-volume routes, keeping training and inference efficient.
+- **Dual-Zone Signal:** The model now incorporates congestion covariates from both the origin and destination zones, capturing how downstream delays affect route-level demand.
+
+**Alternatives considered:**
+- All-to-all OD matrix: Rejected due to sparse data and excessive model size.
+- Clustered zones: Considered, but TLC zones are already meaningful geographic units.
+
 ---
 
 ## ADR-006 – Removal of Feast Feature Store
