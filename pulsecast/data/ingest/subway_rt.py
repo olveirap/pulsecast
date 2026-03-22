@@ -39,6 +39,7 @@ def load_zone_map(csv_path: str = "pulsecast/data/stop_to_zone.csv"):
             logger.info("Loaded %d stop-to-zone mappings.", len(_ZONE_MAP))
         except Exception as e:
             logger.error("Failed to load stop_to_zone map: %s", e)
+            raise
 
 
 def fetch_feed(feed_id: int) -> list[dict]:
@@ -101,13 +102,13 @@ def write_to_db(df: pd.DataFrame, dsn: str | None):
     try:
         params = [
             (
-                int(row["zone_id"]),
-                row["hour"],
-                row["feed_id"],
-                float(row["mean_delay"]),
-                int(row["trip_count"])
+                int(row.zone_id),
+                row.hour,
+                row.feed_id,
+                float(row.mean_delay),
+                int(row.trip_count)
             )
-            for _, row in df.iterrows()
+            for row in df.itertuples(index=False)
         ]
 
         with conn:

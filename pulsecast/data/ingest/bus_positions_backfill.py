@@ -23,8 +23,7 @@ def get_processed_days(start_date: date, end_date: date, dsn: str | None) -> set
         return set()
     
     try:
-        conn = psycopg2.connect(dsn)
-        with conn:
+        with psycopg2.connect(dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT DISTINCT date_trunc('day', hour)::date FROM congestion WHERE hour >= %s AND hour <= %s",
@@ -35,9 +34,6 @@ def get_processed_days(start_date: date, end_date: date, dsn: str | None) -> set
     except Exception as e:
         logger.warning("Failed to query existing days: %s", e)
         return set()
-    finally:
-        if 'conn' in locals() and conn is not None:
-            conn.close()
 
 
 def backfill(start_date: date, end_date: date, dsn: str | None = _DSN):

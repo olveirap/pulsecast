@@ -75,7 +75,7 @@ def _get_taxi_zones() -> gpd.GeoDataFrame:
 def fetch_bus_positions(target_date: date) -> pd.DataFrame:
     """Fetch bus positions from public S3 for the target date."""
     s3_client = boto3.client('s3', config=Config(signature_version=UNSIGNED))
-    key = f"{target_date.year}/{target_date.month:02d}/{target_date.year}-{target_date.month:02d}-{target_date.day:02d}-bus-positions.csv.xz"
+    key = target_date.strftime("%Y/%m/%Y-%m-%d-bus-positions.csv.xz")
     
     logger.info("Fetching s3://%s/%s", _BUCKET_NAME, key)
     try:
@@ -104,7 +104,7 @@ def compute_variance(df: pd.DataFrame, zones: gpd.GeoDataFrame) -> pd.DataFrame:
     elif "time" in df.columns:
         df["hour"] = pd.to_datetime(df["time"]).dt.floor("h")
     else:
-        df["hour"] = pd.Timestamp("today").floor("h")
+        raise ValueError("Input DataFrame must contain a 'timestamp' or 'time' column.")
 
     if "latitude" in df.columns and "longitude" in df.columns:
         gdf = gpd.GeoDataFrame(
@@ -137,13 +137,13 @@ def write_to_db(df: pd.DataFrame, dsn: str | None) -> int:
     try:
         params = [
             (
-                int(row["zone_id"]),
-                row["hour"].to_pydatetime().replace(tzinfo=UTC) if row["hour"].tzinfo is None else row["hour"].to_pydatetime(),
-                float(row["travel_time_var"]),
-                int(row["sample_count"]),
+                int(row.zone_id),
+                row.hour.to_pydatetime().replace(tzinfo=UTC) if row.hour.tzinfo is None else row.hour.to_pydatetime(),
+                float(row.travel_time_var),
+                int(row.sample_count),
                 False  # disruption_flag
             )
-            for _, row in df.iterrows()
+            for row in df.itertuples(index=False)
         ]
 
         with conn:
