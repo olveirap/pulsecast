@@ -112,10 +112,11 @@ def main() -> None:
     # 1. Assert no all-null columns for congestion features
     if len(df) > 100:
         congestion_cols = [c for c in df.columns if "delay_index" in c or "disruption_flag" in c or "low_confidence_flag" in c]
-        for col in congestion_cols:
-            null_count = df.select(pl.col(col).null_count()).item()
-            if null_count == len(df):
+        null_counts = df.select([pl.col(c).null_count().alias(c) for c in congestion_cols]).row(0, named=True)
+        for col, count in null_counts.items():
+            if count == len(df):
                 raise AssertionError(f"Column {col} is all-null!")
+
 
     # 2. Assert no leakage: origin_delay_index_lag1 at time T equals travel_time_var at time T-1
     if len(df) > 100:
@@ -143,10 +144,10 @@ def main() -> None:
             logger.warning("origin_disruption_flag has zero variance or is null.")
 
     # 4. Data Quality Report
-    print("\n" + "="*40)
-    print("      DATA QUALITY REPORT")
-    print("="*40)
-    print(f"Total Rows: {len(df)}")
+    logger.info("\n" + "="*40)
+    logger.info("      DATA QUALITY REPORT")
+    logger.info("="*40)
+    logger.info(f"Total Rows: {len(df)}")
     
     print("\n1. Row count per route (top 5):")
     for row in df.group_by("route_id").agg(pl.len().alias("count")).sort("count", descending=True).head(5).iter_rows():
@@ -154,11 +155,13 @@ def main() -> None:
 
     print("\n2. Min/Max of key features:")
     key_features = ["volume", "origin_delay_index_lag1", "dest_delay_index_lag1", "origin_disruption_flag", "dest_disruption_flag"]
-    for kf in key_features:
-        if kf in df.columns:
-            min_val = df.select(pl.col(kf).min()).item()
-            max_val = df.select(pl.col(kf).max()).item()
-            print(f"  {kf}: min={min_val}, max={max_val}")
+    key_features_in_df = [kf for kf in key_features if kf in df.columns]
+    if key_features_in_df:
+        desc_df = df.select(key_features_in_df).describe()
+        mins = desc_df.filter(pl.col("describe") == "min").row(0, named=True)
+        maxs = desc_df.filter(pl.col("describe") == "max").row(0, named=True)
+        for kf in key_features_in_df:
+            print(f"  {kf}: min={mins[kf]}, max={maxs[kf]}")
 
     print("\n3. Null rates (after 168h warm-up):")
     df_warm = df.with_columns(
@@ -166,11 +169,12 @@ def main() -> None:
     ).filter(pl.col("time_from_start") >= pl.duration(hours=168))
 
     if len(df_warm) > 0:
-        null_rates = df_warm.select([
-            (pl.col(c).null_count() / pl.len()).alias(c) for c in df_warm.columns if c != "time_from_start"
-        ]).row(0)
-        
-        for col, rate in zip([c for c in df_warm.columns if c != "time_from_start"], null_rates):
+        null_counts_df = df_warm.null_count()
+        total_rows = len(df_warm)
+        for col in null_counts_df.columns:
+            if col == "time_from_start":
+                continue
+            rate = null_counts_df[col][0] / total_rows
             print(f"  {col}: {rate:.2%}")
             if ("lag" in col or "rolling" in col) and rate > 0.05:
                 logger.warning(f"Feature {col} has >5% null rate ({rate:.2%}) after 168h warm-up!")
