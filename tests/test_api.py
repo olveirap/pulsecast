@@ -119,7 +119,6 @@ def app_client():
             with (
                 patch.object(main_mod.pg_pool, "ThreadedConnectionPool", new=mock_pool_class),
                 patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.5, 15)),
-                patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.1),
                 patch("pulsecast.serving.main.fetch_demand_history", return_value=(np.zeros(168, dtype=np.float32), np.zeros(168, dtype=np.float32))),
                 patch("pulsecast.serving.main.fetch_congestion_history", return_value=np.zeros(168, dtype=np.float32)),
             ):

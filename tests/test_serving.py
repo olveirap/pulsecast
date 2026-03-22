@@ -171,7 +171,6 @@ def test_forecast_7day_makes_exactly_3_onnx_calls():
     with (
         patch.object(m, "_sessions", mock_sessions),
         patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.0, 15)),
-        patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.0),
         patch("pulsecast.serving.main.fetch_demand_history", return_value=(empty, empty)),
         patch("pulsecast.serving.main.fetch_congestion_history", return_value=empty),
         patch.object(m._cache, "get", return_value=None),
@@ -202,7 +201,6 @@ def test_forecast_response_length_matches_horizon():
         with (
             patch.object(m, "_sessions", mock_sessions),
             patch("pulsecast.serving.main.fetch_bus_congestion", return_value=(0.0, 15)),
-            patch("pulsecast.serving.main.fetch_subway_delay", return_value=0.0),
             patch("pulsecast.serving.main.fetch_demand_history", return_value=(empty, empty)),
             patch("pulsecast.serving.main.fetch_congestion_history", return_value=empty),
             patch.object(m._cache, "get", return_value=None),
