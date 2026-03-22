@@ -32,7 +32,6 @@ from pulsecast.serving.features import (
     fetch_bus_congestion,
     fetch_congestion_history,
     fetch_demand_history,
-    fetch_subway_delay,
     get_conn,
 )
 from pulsecast.serving.schemas import CalibrationResponse, ForecastRequest, ForecastResponse
