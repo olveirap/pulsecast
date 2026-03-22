@@ -60,11 +60,14 @@ def test_run_features(mock_read_db, mock_connect):
     from scripts.run_features import main
 
     # Mock DB data for demand
+    start_dt = datetime(2024, 1, 1)
+    n_hours = 170
+    
     mock_df_demand = pl.DataFrame({
-        "route_id": [132, 132],
-        "hour": [datetime(2024, 1, 1, 0), datetime(2024, 1, 1, 1)],
-        "volume": [10, 20],
-        "avg_duration": [300.0, 310.0],
+        "route_id": [132] * n_hours,
+        "hour": [start_dt + timedelta(hours=i) for i in range(n_hours)],
+        "volume": [10 + i for i in range(n_hours)],
+        "avg_duration": [300.0 + i for i in range(n_hours)],
     }, schema={"route_id": pl.Int32, "hour": pl.Datetime, "volume": pl.Int32, "avg_duration": pl.Float64})
 
     # Mock DB data for routes
@@ -75,11 +78,23 @@ def test_run_features(mock_read_db, mock_connect):
     }, schema={"route_id": pl.Int32, "origin_zone_id": pl.Int32, "destination_zone_id": pl.Int32})
 
     # Mock DB data for congestion
+    zones = [10, 20]
+    hours = []
+    zone_ids = []
+    travel_time_var = []
+    sample_count = []
+    for h in range(n_hours):
+        for z in zones:
+            hours.append(start_dt + timedelta(hours=h))
+            zone_ids.append(z)
+            travel_time_var.append(0.5 + h*0.01 if z == 10 else 0.6 + h*0.01)
+            sample_count.append(15 + h)
+            
     mock_df_congestion = pl.DataFrame({
-        "zone_id": [10, 20],
-        "hour": [datetime(2024, 1, 1, 0), datetime(2024, 1, 1, 0)],
-        "travel_time_var": [0.5, 0.6],
-        "sample_count": [15, 15],
+        "zone_id": zone_ids,
+        "hour": hours,
+        "travel_time_var": travel_time_var,
+        "sample_count": sample_count,
     }, schema={"zone_id": pl.Int32, "hour": pl.Datetime, "travel_time_var": pl.Float64, "sample_count": pl.Int32})
 
     mock_read_db.side_effect = [mock_df_demand, mock_df_routes, mock_df_congestion]
