@@ -2,6 +2,8 @@
 
 Pulsecast is a high-performance, probabilistic shipment demand forecasting system designed for NYC TLC taxi trip records, augmented with live MTA GTFS-Realtime congestion signals. It provides p10/p50/p90 hourly demand forecasts for a 1–7 day horizon, served via a low-latency FastAPI endpoint.
 
+**Note:** Congestion covariates currently zeroed out — bus and subway ingestion deferred to a later milestone.
+
 ## Project Overview
 
 ### Core Technologies

@@ -9,6 +9,8 @@ Pulsecast produces p10/p50/p90 hourly demand forecasts per TLC zone for
 horizons of 1–7 days, served at low latency via a FastAPI endpoint backed by
 ONNX Runtime and a Redis cache.
 
+**Note:** Congestion covariates currently zeroed out — bus and subway ingestion deferred to a later milestone.
+
 ---
 
 ## Architecture

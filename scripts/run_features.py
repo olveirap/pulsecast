@@ -64,6 +64,9 @@ def main() -> None:
         raise SystemExit(1)
 
     # 2. Run feature engineering
+    if df_congestion.is_empty():
+        logger.warning("Congestion data empty; covariates currently zeroed out — bus and subway ingestion deferred to a later milestone.")
+
     logger.info("Building demand features...")
     df = build_demand_features(df_demand)
 
