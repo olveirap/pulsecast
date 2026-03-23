@@ -13,22 +13,22 @@ BACKFILL_START ?= $(shell date -d "$(TODAY) - $(BACKFILL_DAYS) days" +%Y-%m-%d)
 BACKFILL_END   ?= $(TODAY)
 
 # ── Data ingestion ────────────────────────────────────────────────────────────
-ingest: ingest-tlc ingest-subway ingest-bus
+ingest: ingest-tlc #ingest-subway ingest-bus
 
 ingest-tlc:
 	$(POETRY) run python -m pulsecast.data.ingest.tlc
 
-ingest-subway:
-	$(POETRY) run python -m pulsecast.data.ingest.subway_rt
+# ingest-subway:   # deferred: subwaydata.nyc backfill not yet implemented
+# 	$(POETRY) run python -m pulsecast.data.ingest.subway_rt
 
-ingest-bus:
-	$(POETRY) run python -m pulsecast.data.ingest.bus_positions
+# ingest-bus:      # deferred: bus positions source evaluation pending
+# 	$(POETRY) run python -m pulsecast.data.ingest.bus_positions
 
 # ── Backfill ─────────────────────────────────────────────────────────────────
-backfill:
-	$(POETRY) run python -m pulsecast.data.ingest.bus_positions_backfill \
-		--start $(BACKFILL_START) \
-		--end   $(BACKFILL_END)
+# backfill:        # deferred: depends on bus positions decision
+# 	$(POETRY) run python -m pulsecast.data.ingest.bus_positions_backfill \
+# 		--start $(BACKFILL_START) \
+# 		--end   $(BACKFILL_END)
 
 # ── Spatial Mappings ──────────────────────────────────────────────────────────
 # NOTE: requires [geo] extras (geopandas, shapely, etc.)

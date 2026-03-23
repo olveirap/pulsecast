@@ -66,46 +66,46 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # Subway RT poller – streams MTA mean_delay into TimescaleDB
   # ─────────────────────────────────────────────────────────────────────────
-  subway-poller:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: python -m pulsecast.data.ingest.subway_rt
-    environment:
-      MTA_API_KEY: ${MTA_API_KEY:-}
-      SUBWAY_FEED_IDS: ${SUBWAY_FEED_IDS:-GTR,ACE,BDFM,G,JZ,NQRW,L,SIR}
-      MTA_FEED_URL_PATTERN: ${MTA_FEED_URL_PATTERN:-https://api.mta.info/GTFS/{feed_id}}
-      TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f subway_rt || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # subway-poller:  # deferred: subway and bus ingestion not yet active
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   command: python -m pulsecast.data.ingest.subway_rt
+  #   environment:
+  #     MTA_API_KEY: ${MTA_API_KEY:-}
+  #     SUBWAY_FEED_IDS: ${SUBWAY_FEED_IDS:-GTR,ACE,BDFM,G,JZ,NQRW,L,SIR}
+  #     MTA_FEED_URL_PATTERN: ${MTA_FEED_URL_PATTERN:-https://api.mta.info/GTFS/{feed_id}}
+  #     TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+  #   depends_on:
+  #     timescaledb:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pgrep -f subway_rt || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # ─────────────────────────────────────────────────────────────────────────
   # Bus Positions poller – streams travel_time_var into TimescaleDB
   # ─────────────────────────────────────────────────────────────────────────
-  bus-poller:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: python -m pulsecast.data.ingest.bus_positions
-    environment:
-      BUS_POSITIONS_BUCKET: ${BUS_POSITIONS_BUCKET:-nycbuspositions}
-      TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f bus_positions || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # bus-poller:  # deferred: subway and bus ingestion not yet active
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   command: python -m pulsecast.data.ingest.bus_positions
+  #   environment:
+  #     BUS_POSITIONS_BUCKET: ${BUS_POSITIONS_BUCKET:-nycbuspositions}
+  #     TIMESCALE_DSN: postgresql://pulsecast:pulsecast@timescaledb:5432/pulsecast
+  #   depends_on:
+  #     timescaledb:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pgrep -f bus_positions || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # ─────────────────────────────────────────────────────────────────────────
   # FastAPI serving layer

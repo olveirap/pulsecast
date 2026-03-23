@@ -64,6 +64,9 @@ def main() -> None:
         raise SystemExit(1)
 
     # 2. Run feature engineering
+    if df_congestion.is_empty():
+        logger.warning("Congestion data empty; covariates currently zeroed out — bus and subway ingestion deferred to a later milestone.")
+
     logger.info("Building demand features...")
     df = build_demand_features(df_demand)
 
@@ -105,6 +108,83 @@ def main() -> None:
         right_on=["zone_id", "hour"],
         how="left",
     )
+
+    # --- Data Quality Checks ---
+    logger.info("Running data quality checks...")
+    
+    # 1. Assert no all-null columns for congestion features
+    if len(df) > 100:
+        congestion_cols = [c for c in df.columns if "delay_index" in c or "disruption_flag" in c or "low_confidence_flag" in c]
+        null_counts = df.select([pl.col(c).null_count().alias(c) for c in congestion_cols]).row(0, named=True)
+        for col, count in null_counts.items():
+            if count == len(df):
+                raise AssertionError(f"Column {col} is all-null!")
+
+
+    # 2. Assert no leakage: origin_delay_index_lag1 at time T equals travel_time_var at time T-1
+    if len(df) > 100:
+        leakage_check = df.select(["origin_zone_id", "hour", "origin_delay_index_lag1"]).drop_nulls()
+        df_cong_shifted = df_congestion.with_columns(
+            (pl.col("hour") + pl.duration(hours=1)).alias("hour")
+        )
+        leakage_join = leakage_check.join(
+            df_cong_shifted,
+            left_on=["origin_zone_id", "hour"],
+            right_on=["zone_id", "hour"],
+            how="inner"
+        )
+        if len(leakage_join) > 0:
+            diffs = leakage_join.filter(
+                (pl.col("origin_delay_index_lag1") - pl.col("travel_time_var")).abs() > 1e-6
+            )
+            if len(diffs) > 0:
+                raise AssertionError(f"Leakage detected! {len(diffs)} rows have mismatched lags.")
+
+    # 3. Assert disruption_flag has non-zero variance
+    if len(df) > 200 and "origin_disruption_flag" in df.columns:
+        var_origin = df.select(pl.col("origin_disruption_flag").var()).item()
+        if var_origin is None or var_origin == 0:
+            logger.warning("origin_disruption_flag has zero variance or is null.")
+
+    # 4. Data Quality Report
+    logger.info("\n" + "="*40)
+    logger.info("      DATA QUALITY REPORT")
+    logger.info("="*40)
+    logger.info(f"Total Rows: {len(df)}")
+    
+    logger.info("\n1. Row count per route (top 5):")
+    for row in df.group_by("route_id").agg(pl.len().alias("count")).sort("count", descending=True).head(5).iter_rows():
+        logger.info(f"  Route {row[0]}: {row[1]} rows")
+
+    logger.info("\n2. Min/Max of key features:")
+    key_features = ["volume", "origin_delay_index_lag1", "dest_delay_index_lag1", "origin_disruption_flag", "dest_disruption_flag"]
+    key_features_in_df = [kf for kf in key_features if kf in df.columns]
+    if key_features_in_df:
+        desc_df = df.select(key_features_in_df).describe()
+        mins = desc_df.filter(pl.col("statistic") == "min").row(0, named=True)
+        maxs = desc_df.filter(pl.col("statistic") == "max").row(0, named=True)
+        for kf in key_features_in_df:
+            logger.info(f"  {kf}: min={mins[kf]}, max={maxs[kf]}")
+
+    logger.info("\n3. Null rates (after 168h warm-up):")
+    df_warm = df.with_columns(
+        (pl.col("hour") - pl.col("hour").min().over("route_id")).alias("time_from_start")
+    ).filter(pl.col("time_from_start") >= pl.duration(hours=168))
+
+    if len(df_warm) > 0:
+        null_counts_df = df_warm.null_count()
+        total_rows = len(df_warm)
+        for col in null_counts_df.columns:
+            if col == "time_from_start":
+                continue
+            rate = null_counts_df[col][0] / total_rows
+            logger.info(f"  {col}: {rate:.2%}")
+            if ("lag" in col or "rolling" in col) and rate > 0.05:
+                logger.warning(f"Feature {col} has >5% null rate ({rate:.2%}) after 168h warm-up!")
+    else:
+        logger.info("  Not enough data to assess 168h warm-up.")
+        
+    logger.info("="*40 + "\n")
 
     # Fill missing congestion with 0
     df = df.fill_null(0.0)
