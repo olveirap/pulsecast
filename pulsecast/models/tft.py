@@ -95,8 +95,10 @@ class TFTForecaster:
             ],
             time_varying_unknown_reals=[
                 "volume",
-                "delay_index",
-                "disruption_flag",
+                "origin_delay_index_lag1",
+                "dest_delay_index_lag1",
+                "origin_disruption_flag",
+                "dest_disruption_flag",
             ],
             target_normalizer=GroupNormalizer(
                 groups=["route_id"], transformation="softplus"

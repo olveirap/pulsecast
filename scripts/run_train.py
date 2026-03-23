@@ -81,43 +81,55 @@ def train_baseline(train_df: pl.DataFrame, models_dir: Path) -> None:
         logger.info("Baseline saved to %s", path)
 
 
-def train_lgbm(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, models_dir: Path) -> LGBMForecaster:
-    logger.info("Starting LightGBM training...")
-    with mlflow.start_run(run_name="LightGBM-Quantile", nested=True):
+def train_lgbm(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_val: np.ndarray, models_dir: Path, run_name: str = "LightGBM-Quantile", log_model: bool = True) -> LGBMForecaster:
+    logger.info("Starting LightGBM training for %s...", run_name)
+    with mlflow.start_run(run_name=run_name, nested=True):
         forecaster = LGBMForecaster()
         forecaster.fit(X_train, y_train, eval_set=(X_val, y_val))
         
-        logger.info("Running LightGBM cross-validation...")
+        logger.info("Running LightGBM cross-validation for %s...", run_name)
         # Use a dedicated instance so CV retraining does not overwrite persisted models.
         cv_forecaster = LGBMForecaster()
         cv_results = cv_forecaster.cross_validate(X_train, y_train, n_splits=3)
-        for fold, res in enumerate(cv_results):
-            for q_name, loss in res.items():
-                mlflow.log_metric(f"fold{fold}_{q_name}_pinball", loss)
         
-        # Save model
-        path = models_dir / "lgbm_forecaster.pkl"
-        with open(path, "wb") as f:
-            pickle.dump(forecaster, f)
-        mlflow.log_artifact(str(path))
-        logger.info("LightGBM saved to %s", path)
+        metrics_agg = {}
+        for fold, res in enumerate(cv_results):
+            for metric_name, value in res.items():
+                mlflow.log_metric(f"fold{fold}_{metric_name}", value)
+                metrics_agg.setdefault(metric_name, []).append(value)
+                
+        # Log mean metrics
+        for metric_name, values in metrics_agg.items():
+            mlflow.log_metric(f"mean_{metric_name}", float(np.mean(values)))
+            logger.info("%s mean %s: %.4f", run_name, metric_name, float(np.mean(values)))
+        
+        # Save model if requested
+        if log_model:
+            path = models_dir / "lgbm_forecaster.pkl"
+            with open(path, "wb") as f:
+                pickle.dump(forecaster, f)
+            mlflow.log_artifact(str(path))
+            logger.info("LightGBM saved to %s", path)
         return forecaster
 
 
 def train_tft(train_df: pl.DataFrame, val_df: pl.DataFrame) -> None:
     logger.info("Starting TFT training...")
-    # TFT expects a time_idx
+    # TFT expects a time_idx and string categoricals
     train_df = train_df.with_columns(
-        (pl.col("hour").rank("dense") - 1).cast(pl.Int32).alias("time_idx")
+        (pl.col("hour").rank("dense") - 1).cast(pl.Int32).alias("time_idx"),
+        pl.col("route_id").cast(pl.Utf8)
     )
     # Correctly aligning time_idx for validation
     max_time_idx = train_df.select(pl.col("time_idx").max().cast(pl.Int64)).item()
     offset = int(max_time_idx) + 1
     val_df = val_df.with_columns(
-        (pl.col("hour").rank("dense") - 1 + offset).cast(pl.Int32).alias("time_idx")
+        (pl.col("hour").rank("dense") - 1 + offset).cast(pl.Int32).alias("time_idx"),
+        pl.col("route_id").cast(pl.Utf8)
     )
 
     with mlflow.start_run(run_name="TFT", nested=True):
+        mlflow.set_tag("status", "experimental")
         forecaster = TFTForecaster(max_epochs=5)  # low epochs for demo
         forecaster.fit(train_df.to_pandas(), val_df.to_pandas())
         
@@ -148,10 +160,21 @@ def main() -> None:
     
     X_train, y_train, X_val, y_val, train_df, val_df = prepare_data(df)
     
+    # Prepare ablation features (no congestion features)
+    base_features = [f for f in LGBM_FEATURES if "delay_index" not in f and "travel_time_var" not in f and "disruption_flag" not in f]
+    X_train_base = train_df.select(base_features).to_numpy()
+    X_val_base = val_df.select(base_features).to_numpy()
+    
     logger.info("Opening main MLflow run...")
     with mlflow.start_run(run_name="Pulsecast-Train-Pipeline"):
         train_baseline(train_df, models_dir)
-        train_lgbm(X_train, y_train, X_val, y_val, models_dir)
+        
+        # Ablation run: No congestion features
+        train_lgbm(X_train_base, y_train, X_val_base, y_val, models_dir, run_name="LightGBM-Ablation-No-Congestion", log_model=False)
+        
+        # Full features run
+        train_lgbm(X_train, y_train, X_val, y_val, models_dir, run_name="LightGBM-Quantile", log_model=True)
+        
         train_tft(train_df, val_df)
     logger.info("Training pipeline finished.")
 

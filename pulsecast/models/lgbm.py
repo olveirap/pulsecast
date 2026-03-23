@@ -131,6 +131,9 @@ class LGBMForecaster:
                 err = y_val - preds[q_name]
                 loss = float(np.mean(np.where(err >= 0, q_val * err, (q_val - 1) * err)))
                 losses[q_name] = loss
+            
+            losses["coverage_80pct"] = float(np.mean((y_val >= preds["p10"]) & (y_val <= preds["p90"])))
+            
             fold_results.append(losses)
             logger.info("Fold %d – losses: %s", fold, losses)
 
