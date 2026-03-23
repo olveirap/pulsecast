@@ -152,21 +152,21 @@ def main() -> None:
     logger.info("="*40)
     logger.info(f"Total Rows: {len(df)}")
     
-    print("\n1. Row count per route (top 5):")
+    logger.info("\n1. Row count per route (top 5):")
     for row in df.group_by("route_id").agg(pl.len().alias("count")).sort("count", descending=True).head(5).iter_rows():
-        print(f"  Route {row[0]}: {row[1]} rows")
+        logger.info(f"  Route {row[0]}: {row[1]} rows")
 
-    print("\n2. Min/Max of key features:")
+    logger.info("\n2. Min/Max of key features:")
     key_features = ["volume", "origin_delay_index_lag1", "dest_delay_index_lag1", "origin_disruption_flag", "dest_disruption_flag"]
     key_features_in_df = [kf for kf in key_features if kf in df.columns]
     if key_features_in_df:
         desc_df = df.select(key_features_in_df).describe()
-        mins = desc_df.filter(pl.col("describe") == "min").row(0, named=True)
-        maxs = desc_df.filter(pl.col("describe") == "max").row(0, named=True)
+        mins = desc_df.filter(pl.col("statistic") == "min").row(0, named=True)
+        maxs = desc_df.filter(pl.col("statistic") == "max").row(0, named=True)
         for kf in key_features_in_df:
-            print(f"  {kf}: min={mins[kf]}, max={maxs[kf]}")
+            logger.info(f"  {kf}: min={mins[kf]}, max={maxs[kf]}")
 
-    print("\n3. Null rates (after 168h warm-up):")
+    logger.info("\n3. Null rates (after 168h warm-up):")
     df_warm = df.with_columns(
         (pl.col("hour") - pl.col("hour").min().over("route_id")).alias("time_from_start")
     ).filter(pl.col("time_from_start") >= pl.duration(hours=168))
@@ -178,13 +178,13 @@ def main() -> None:
             if col == "time_from_start":
                 continue
             rate = null_counts_df[col][0] / total_rows
-            print(f"  {col}: {rate:.2%}")
+            logger.info(f"  {col}: {rate:.2%}")
             if ("lag" in col or "rolling" in col) and rate > 0.05:
                 logger.warning(f"Feature {col} has >5% null rate ({rate:.2%}) after 168h warm-up!")
     else:
-        print("  Not enough data to assess 168h warm-up.")
+        logger.info("  Not enough data to assess 168h warm-up.")
         
-    print("="*40 + "\n")
+    logger.info("="*40 + "\n")
 
     # Fill missing congestion with 0
     df = df.fill_null(0.0)
