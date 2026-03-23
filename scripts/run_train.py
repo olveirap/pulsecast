@@ -161,7 +161,17 @@ def main() -> None:
     X_train, y_train, X_val, y_val, train_df, val_df = prepare_data(df)
     
     # Prepare ablation features (no congestion features)
-    base_features = [f for f in LGBM_FEATURES if "delay_index" not in f and "travel_time_var" not in f and "disruption_flag" not in f]
+    congestion_features_to_exclude = {
+        "origin_travel_time_var",
+        "dest_travel_time_var",
+        "origin_delay_index_lag1",
+        "origin_delay_index_rolling3h",
+        "origin_disruption_flag",
+        "dest_delay_index_lag1",
+        "dest_delay_index_rolling3h",
+        "dest_disruption_flag",
+    }
+    base_features = [f for f in LGBM_FEATURES if f not in congestion_features_to_exclude]
     X_train_base = train_df.select(base_features).to_numpy()
     X_val_base = val_df.select(base_features).to_numpy()
     
