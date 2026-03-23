@@ -91,8 +91,8 @@ def train_lgbm(X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray, y_va
         # Use a dedicated instance so CV retraining does not overwrite persisted models.
         cv_forecaster = LGBMForecaster()
         cv_results = cv_forecaster.cross_validate(X_train, y_train, n_splits=3)
-        
-        metrics_agg = {}
+
+        metrics_agg: dict[str, list[float]] = {}
         for fold, res in enumerate(cv_results):
             for metric_name, value in res.items():
                 mlflow.log_metric(f"fold{fold}_{metric_name}", value)
