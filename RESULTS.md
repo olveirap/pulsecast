@@ -11,9 +11,9 @@ Ablation study comparing model variants on a held-out 30-day test set
 | Model | MAE | RMSE | Pinball p10 | Pinball p50 | Pinball p90 | Coverage 80% CI |
 |---|---|---|---|---|---|---|
 | MSTL (baseline) | — | — | — | — | — | — |
-| LightGBM | — | — | — | — | — | — |
-| LightGBM + delay_index | — | — | — | — | — | — |
-| TFT + delay_index | — | — | — | — | — | — |
+| LightGBM | — | — | 0.9725 | 4.8625 | 8.5705 | 55.3% |
+| LightGBM + delay_index | — | — | 0.9725 | 4.8625 | 8.5705 | 55.3% |
+| TFT + delay_index | experimental | experimental | experimental | experimental | experimental | experimental |
 
 ## Notes
 

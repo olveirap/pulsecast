@@ -208,8 +208,10 @@ __marimo__/
 
 # Data and models
 /data/
-models/
+/models/
 .logs/
+/mlruns/
 
 .gemini/
 gha-creds-*.json
+

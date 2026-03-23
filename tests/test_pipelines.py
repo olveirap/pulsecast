@@ -123,10 +123,11 @@ def test_run_features(mock_read_db, mock_connect):
 @patch("mlflow.log_metric")
 @patch("mlflow.log_artifact")
 @patch("mlflow.log_artifacts")
+@patch("mlflow.set_tag")
 @patch("scripts.run_train.BaselineForecaster")
 @patch("scripts.run_train.LGBMForecaster")
 @patch("scripts.run_train.TFTForecaster")
-def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_log_artifacts, mock_log_artifact, mock_log_metric, mock_start_run, mock_set_experiment, mock_set_uri):
+def test_run_train(mock_tft, mock_lgbm, mock_baseline, mock_set_tag, mock_log_artifacts, mock_log_artifact, mock_log_metric, mock_start_run, mock_set_experiment, mock_set_uri):
     """run_train should load features and train models with MLflow logging."""
     print("\nStarting test_run_train...")
     from scripts.run_train import main
